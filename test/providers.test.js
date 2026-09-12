@@ -19,3 +19,19 @@ test('quota classification handles rate and credit exhaustion',()=>{
   assert.equal(classifyHttpFailure(429,'rate limit'),'quota_or_rate_limit');
   assert.equal(classifyHttpFailure(400,'insufficient credit'),'quota_or_rate_limit');
 });
+
+test('provider response body is bounded', async()=>{
+  const old=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:'x'.repeat(1000)}}]}),{status:200});
+  try{
+    await assert.rejects(()=>callProvider({name:'custom',protocol:'openai',baseURL:'http://127.0.0.1:11434/v1',apiKey:'local',model:'m'},[{role:'user',content:'x'}],{timeoutMs:1000,maxResponseBytes:128}),/exceeds configured limit/);
+  } finally { globalThis.fetch=old; }
+});
+
+test('provider empty assistant content is rejected for failover', async()=>{
+  const old=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:'   '}}]}),{status:200});
+  try{
+    await assert.rejects(()=>callProvider({name:'custom',protocol:'openai',baseURL:'http://127.0.0.1:11434/v1',apiKey:'local',model:'m'},[{role:'user',content:'x'}],{timeoutMs:1000}),/No assistant content/);
+  } finally { globalThis.fetch=old; }
+});

@@ -34,7 +34,7 @@ test('swarm can run more workers than providers using bounded provider slots', {
     if (++submittedCalls === 5) submitted.resolve();
     return result;
   };
-  const work = router.swarmRun({ project_id: 'p', mission_id: 'm', goal: 'build', roles: ['a', 'b', 'c', 'd', 'e'], max_agents: 5 });
+  const work = router.swarmRun({ project_id: 'p', mission_id: 'm', goal: 'build', roles: ['architect', 'backend', 'frontend', 'security', 'qa'], max_agents: 5 });
   let watchdog;
   try {
     await Promise.race([

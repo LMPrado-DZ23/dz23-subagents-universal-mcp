@@ -5,7 +5,7 @@
 [Português / full guide](README.md) · [Installation](docs/INSTALL_ANY_HARNESS.md) · [Security](SECURITY.md)
 
 Self-hosted MCP text-delegation router, shared filesystem mission memory, provider
-failover and bounded parallel specialist model calls. Version 2.2.4 is an
+failover and bounded parallel specialist model calls. Version 2.2.5 is an
 **engineering preview**, licensed MIT, with Node.js 22+ and no runtime npm dependencies.
 
 Workers return text/code. They do not automatically execute shell commands, edit
@@ -32,7 +32,8 @@ Tools: `list_models`, `provider_inventory`, `discover_models`, `health_check`,
 
 ## Boundaries
 
-Use stdio locally or HTTP behind TLS with a private bearer token. Non-loopback binds
+Use stdio locally. HTTP is disabled by default and, when explicitly enabled, must run
+behind TLS with a private bearer token. Non-loopback binds
 require at least 32 token characters; HTTP validates Host and Origin. There is no
 per-user authorization, OAuth server or tenant isolation. Treat one instance as a
 single trusted security domain. Vision, embeddings, provider tool calling and output
@@ -45,9 +46,15 @@ to overwrite repositories. See [publishing](docs/PUBLISH_GITHUB.md).
 
 MIT copyright notice is retained. API credits and provider terms are separate.
 
+## v2.2.5 hardening
+
+Swarm roles prefer the first eligible target and use later targets only for failover.
+Roles are a strict enum; mission memory and prior model outputs are labeled untrusted.
+Queues, provider response bodies, stdio frames, stored outputs, journals and checkpoints
+are bounded. HTTP requires an explicit opt-in.
+
 ## v2.2.4 correction
 
-Swarm roles are assigned round-robin across eligible targets before reuse.
 Concurrency tests hold calls behind promise barriers, observe simultaneous in-flight
 work and queued calls, then release them. No passing assertion depends on a 30/40 ms
 response window. Watchdogs still fail stuck/serialized execution.

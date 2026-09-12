@@ -1,4 +1,27 @@
-# Validação da correção v2.2.4
+# Validação
+
+## v2.2.5 — hardening e integração real
+
+Data: 2026-09-12. Ambiente executado: Windows, Node.js v24.16.0.
+Base: repositório público `main` no commit `458d4067e008c2a21da69cc3f9c07a32dd12b1d9`,
+confirmado byte a byte contra o ZIP v2.2.4 auditado.
+
+- `npm run check`: 20 arquivos JavaScript verificados.
+- `npm test`: 33 aprovados, 0 falhas, 0 ignorados.
+- MCP stdio: `initialize` e `tools/list` reais; dez ferramentas descobertas.
+- `health_check`: `deepseek-v4-flash:cloud` e `qwen2.5:0.5b` responderam via
+  endpoint OpenAI-compatible do daemon Ollama local; o primeiro é executado na
+  nuvem do Ollama e o segundo localmente.
+- `swarm_run`: sete papéis (`architect`, `backend`, `frontend`, `security`, `qa`,
+  `devops`, `reviewer`) mais integração final concluíram com conteúdo não vazio no
+  DeepSeek cloud em 22,988 s. O teste usou somente dados sintéticos.
+
+O scanner nativo profundo não iniciou porque o ambiente do assistente não forneceu
+perfil gerenciado de filesystem ao worker. A revisão foi concluída por inspeção
+estática manual, validação do manifesto/hash, Microsoft Defender sem detecções,
+testes unitários e smokes reais. Isso não equivale a pentest independente.
+
+## Histórico v2.2.4
 
 Data: 2026-09-12. Ambiente executado: Linux x86_64, Node.js v22.16.0.
 Base: `DZ23-Subagents-MCP-v2.2.3-OPEN-SOURCE.zip`.

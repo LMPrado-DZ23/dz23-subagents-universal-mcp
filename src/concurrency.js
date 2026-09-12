@@ -1,13 +1,15 @@
 /** In-process call limits, shared by delegates, swarms, retries and health checks. */
 export class ConcurrencyLimiter {
-  constructor(maxTotal, maxPerTarget) {
+  constructor(maxTotal, maxPerTarget, maxQueue = 32) {
     this.maxTotal = Math.max(1, Math.floor(maxTotal));
     this.maxPerTarget = Math.max(1, Math.floor(maxPerTarget));
+    this.maxQueue = Math.max(1, Math.floor(maxQueue));
     this.active = 0;
     this.byTarget = new Map();
     this.queue = [];
   }
   async run(key, operation) {
+    if (this.queue.length >= this.maxQueue) throw new Error('Delegation queue is full');
     await new Promise(resolve => { this.queue.push({key, resolve}); this.drain(); });
     try { return await operation(); }
     finally {

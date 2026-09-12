@@ -2,7 +2,7 @@
 
 Esta é uma prévia de engenharia para uso por um operador/equipe confiável.
 Não há certificação de segurança, pentest independente ou isolamento multitenant.
-A versão preparada nesta entrega é 2.2.4; versões anteriores não recebem promessa
+A versão preparada nesta entrega é 2.2.5; versões anteriores não recebem promessa
 automática de backport ou SLA.
 
 ## Relatar um problema
@@ -17,7 +17,8 @@ Teste exclusivamente cópias locais/ambientes autorizados com dados sintéticos.
 
 - Uma instância = um domínio de confiança. `project_id` não é uma barreira de autorização.
 - Proteja o diretório de memória e seus backups; ele pode conter código e dados privados.
-- HTTP remoto exige TLS no proxy e token privado; não há OAuth, RBAC ou validação por usuário.
+- HTTP permanece desativado por padrão. Se habilitado, exige TLS no proxy e token privado;
+  não há OAuth, RBAC ou validação por usuário.
 - Configure limites de conexão/rate limit no proxy; não exponha a instância para público hostil.
 - Não conceda shell irrestrito a agentes. O MCP retorna texto; permissões de execução são do host.
 - Entrada/saída de modelo é não confiável. Revise propostas antes de aplicá-las.
@@ -26,8 +27,9 @@ Teste exclusivamente cópias locais/ambientes autorizados com dados sintéticos.
 
 ## Controles desta versão
 
-Bloqueio de alvo pago/low-cost também na seleção explícita; semáforos de chamadas;
-IDs estritos para memória; novas permissões de arquivos restritas quando suportadas;
+Bloqueio de alvo pago/low-cost também na seleção explícita; limites de chamadas e fila;
+papéis em enum estrito; contexto persistido rotulado como não confiável; limites de
+resposta, frame stdio e retenção; IDs estritos para memória; novas permissões restritas;
 erros HTTP de providers sem corpo bruto; validação de Host/Origin; token obrigatório
 em bind não local; allowlist/hash e scanner por padrões no fluxo de publicação.
 

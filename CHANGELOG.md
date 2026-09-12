@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.2.5 — 2026-09-12 — hardening de orquestração e limites
+
+- Contexto persistido e saídas de modelos são enviados como dados não confiáveis;
+  papéis agora usam enum estrito e QA/DevOps não podem alegar execução de ações.
+- `swarm_run` usa o primeiro alvo como principal e os seguintes apenas como failover,
+  evitando distribuir trabalho ao modelo de fallback quando o principal está saudável.
+- Limites configuráveis para fila, resposta HTTP, frame stdio, outputs persistidos,
+  journal e checkpoints; concorrência e quantidade de agentes possuem tetos.
+- Modo HTTP desativado por padrão e condicionado a opt-in explícito.
+- Locks de memória toleram erros transitórios do Windows sem remover exclusão mútua.
+- Regressões cobrem papéis arbitrários, contexto não confiável, limite de resposta
+  vazia, evento excessivo e preferência do alvo principal. Smoke real no Windows/
+  Node 24 validou os sete papéis e o reviewer integrador usando o modelo cloud
+  `deepseek-v4-flash:cloud` por meio do daemon Ollama local.
+
 ## 2.2.4 — 2026-09-12 — paralelismo verificável e distribuição de workers
 
 - Corrigido round-robin em `swarm_run`: papéis usam alvos elegíveis distintos

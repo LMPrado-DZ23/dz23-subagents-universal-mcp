@@ -6,7 +6,7 @@ if errorlevel 1 (
     pause
     exit /b 1
 )
-echo DZ23 Subagents MCP v2.2.4 - primeira publicacao PUBLICA no GitHub
+echo DZ23 Subagents MCP v2.2.5 - publicacao no GitHub
 echo Requer Node.js 22+, Git e GitHub CLI autenticado neste computador.
 echo Todos os testes e verificacoes precisam passar antes da publicacao.
 echo.

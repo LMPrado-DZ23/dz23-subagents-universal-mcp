@@ -4,7 +4,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v2.2.4 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
+**v2.2.5 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
 
 [English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
@@ -48,13 +48,13 @@ Claude / Codex / Hermes / cliente MCP
 | Recurso | Escopo implementado |
 | --- | --- |
 | Delegação e failover | OpenAI-compatible e Anthropic Messages nativa; saída textual |
-| Memória | JSON, journal e checkpoints no filesystem; locks por projeto |
-| Paralelismo | Limites de chamadas globais e por provider:model, por processo |
-| Papéis | Architect, Backend, Frontend, Security, QA, DevOps, Reviewer e nomes customizados |
+| Memória | JSON, journal e checkpoints no filesystem; locks e retenção limitada por projeto |
+| Paralelismo | Limites de chamadas globais, por provider:model e de fila, por processo |
+| Papéis | Architect, Backend, Frontend, Security, QA, DevOps, Reviewer e Worker; enum estrito |
 | Inventário | Configuração e origem da credencial, sem devolver o valor da chave |
 | Model discovery | Consulta ao catálogo exposto pelo adapter; não prova acesso a inferência |
 | Saúde | Uma pequena geração real, quando o operador chama `health_check` |
-| MCP | Descoberta/chamada de ferramentas via stdio; HTTP JSON sem SSE |
+| MCP | Descoberta/chamada via stdio; HTTP JSON sem SSE desativado por padrão |
 | Segredos | Ambiente e arquivos `*_FILE`; sem Vault, OAuth ou multitenancy implementados |
 
 **Não entregue esta prévia como um SaaS multitenant ou como execução autônoma

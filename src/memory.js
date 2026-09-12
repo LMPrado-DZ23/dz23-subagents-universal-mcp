@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
+const transientLockErrors = new Set(['EEXIST','EPERM','EBUSY','ENOTEMPTY']);
 const safe = s => {
   if (typeof s !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(s)) {
     throw new Error('Invalid memory identifier: use 1-120 letters, digits, dots, underscores or hyphens; start with a letter or digit');
@@ -14,15 +15,24 @@ async function atomicJson(file,obj){ await ensureDir(path.dirname(file)); const 
 async function readJson(file,fallback){ try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;} }
 
 export class ProjectMemory {
-  constructor(root){ this.root=root; }
+  constructor(root, options={}){
+    this.root=root;
+    this.maxStoredOutputChars=options.maxStoredOutputChars||12000;
+    this.maxAgentOutputs=options.maxAgentOutputs||16;
+    this.maxJournalBytes=options.maxJournalBytes||1024*1024;
+    this.maxEventBytes=Math.max(4096,Math.min(65536,Math.floor(this.maxJournalBytes/4)));
+    this.maxCheckpoints=options.maxCheckpoints||8;
+  }
   projectDir(projectId){ return path.join(this.root,'projects',safe(projectId)); }
   missionDir(projectId,missionId){ return path.join(this.projectDir(projectId),'missions',safe(missionId)); }
   async withLock(projectId, fn){
     const dir=this.projectDir(projectId); await ensureDir(dir); const lock=path.join(dir,'.lock');
     let acquired=false;
-    for(let i=0;i<100;i++){ try{await fs.mkdir(lock,{mode:0o700});acquired=true;break;}catch(e){if(e.code!=='EEXIST')throw e;await sleep(20+Math.random()*30);} }
+    for(let i=0;i<500;i++){ try{await fs.mkdir(lock,{mode:0o700});acquired=true;break;}catch(e){if(!transientLockErrors.has(e.code))throw e;await sleep(20+Math.random()*30);} }
     if(!acquired) throw new Error(`Memory lock timeout for ${projectId}`);
-    try{return await fn();}finally{await fs.rm(lock,{recursive:true,force:true});}
+    try{return await fn();}finally{
+      for(let i=0;i<20;i++){try{await fs.rm(lock,{recursive:true,force:true});break;}catch(e){if(!transientLockErrors.has(e.code)||i===19)throw e;await sleep(20+Math.random()*30);}}
+    }
   }
   async initProject(projectId, data={}){
     return this.withLock(projectId, async()=>{
@@ -54,22 +64,39 @@ export class ProjectMemory {
   async recordAgentResult(projectId,missionId, agent, output){
     return this.withLock(projectId, async()=>{
       const file=path.join(this.missionDir(projectId,missionId),'state.json'); const cur=await readJson(file,null); if(!cur) throw new Error('Mission not found');
-      const next={...cur,sequence:(cur.sequence||0)+1,updated_at:new Date().toISOString(),agents:[...(cur.agents||[]),agent],agent_outputs:[...(cur.agent_outputs||[]),{agent_id:agent.id,role:agent.role,provider:agent.provider,model:agent.model,content:output,at:new Date().toISOString()}],last_output:output,last_provider:agent.provider,last_model:agent.model};
+      const content=String(output??'').slice(0,this.maxStoredOutputChars);
+      const agents=[...(cur.agents||[]),agent].slice(-this.maxAgentOutputs*2);
+      const agent_outputs=[...(cur.agent_outputs||[]),{agent_id:agent.id,role:agent.role,provider:agent.provider,model:agent.model,content,at:new Date().toISOString()}].slice(-this.maxAgentOutputs);
+      const next={...cur,sequence:(cur.sequence||0)+1,updated_at:new Date().toISOString(),agents,agent_outputs,last_output:content,last_provider:agent.provider,last_model:agent.model};
       await atomicJson(file,next); return next;
     });
   }
   async appendEvent(projectId,missionId,type,payload={}){
     const ev={id:crypto.randomUUID(),ts:new Date().toISOString(),type,payload};
+    let line=JSON.stringify(ev);
+    if(Buffer.byteLength(line)>this.maxEventBytes){ev.payload={truncated:true,original_bytes:Buffer.byteLength(line)};line=JSON.stringify(ev);}
     return this.withLock(projectId, async()=>{
       const dir=this.missionDir(projectId,missionId); await ensureDir(dir);
-      await fs.appendFile(path.join(dir,'journal.jsonl'),JSON.stringify(ev)+'\n',{mode:0o600}); return ev;
+      const journal=path.join(dir,'journal.jsonl');
+      await fs.appendFile(journal,line+'\n',{mode:0o600});
+      const stat=await fs.stat(journal);
+      if(stat.size>this.maxJournalBytes){
+        const text=await fs.readFile(journal,'utf8');
+        const lines=text.trim().split('\n').filter(Boolean);const kept=[];let bytes=0;
+        for(let i=lines.length-1;i>=0;i--){const lineBytes=Buffer.byteLength(lines[i]+'\n');if(bytes+lineBytes>Math.floor(this.maxJournalBytes*0.75))break;kept.unshift(lines[i]);bytes+=lineBytes;}
+        await fs.writeFile(journal,kept.join('\n')+'\n',{mode:0o600});
+      }
+      return ev;
     });
   }
   async checkpoint(projectId,missionId, extra={}){
     return this.withLock(projectId, async()=>{
       const state=await this.getMission(projectId,missionId); if(!state) throw new Error('Mission not found');
       const seq=(state.sequence||0)+1; const cp={...state,...extra,sequence:seq,checkpoint_at:new Date().toISOString()};
-      const dir=path.join(this.missionDir(projectId,missionId),'checkpoints'); await ensureDir(dir); await atomicJson(path.join(dir,`${String(seq).padStart(6,'0')}.json`),cp); await atomicJson(path.join(this.missionDir(projectId,missionId),'state.json'),cp); return cp;
+      const dir=path.join(this.missionDir(projectId,missionId),'checkpoints'); await ensureDir(dir); await atomicJson(path.join(dir,`${String(seq).padStart(6,'0')}.json`),cp); await atomicJson(path.join(this.missionDir(projectId,missionId),'state.json'),cp);
+      const checkpoints=(await fs.readdir(dir)).filter(x=>/^\d{6}\.json$/.test(x)).sort();
+      await Promise.all(checkpoints.slice(0,-this.maxCheckpoints).map(x=>fs.rm(path.join(dir,x),{force:true})));
+      return cp;
     });
   }
   async recentEvents(projectId,missionId,limit=50){

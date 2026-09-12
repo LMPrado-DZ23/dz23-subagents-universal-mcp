@@ -26,7 +26,7 @@ test('quota failover preserves mission context and continues on next provider', 
   const out=await r.delegate({project_id:'proj',mission_id:'mission',goal:'finish project',prompt:'continue implementation'});
   assert.equal(out.provider,'p2');
   assert.equal(seen.length,2);
-  assert.match(seen[1].text,/previous provider failed/i);
+  assert.match(seen[1].text,/previous target failed/i);
   const ev=await memory.recentEvents('proj','mission',50);
   assert.ok(ev.some(x=>x.type==='provider_failed'&&x.payload.provider==='p1'));
   const state=await memory.getMission('proj','mission');
@@ -109,12 +109,12 @@ async function proveSwarmOverlap(t, { slowPreparation = false } = {}) {
     assert.equal(active, 3, 'all three calls must be in flight before any can finish');
     assert.equal(completed, 0);
     assert.equal(integrationStarted, false);
-    assert.deepEqual([...names].sort(), ['p1', 'p2', 'p3'], 'roles must use distinct eligible targets before reusing one');
+    assert.deepEqual([...names].sort(), ['p1', 'p1', 'p1'], 'all roles must prefer the first eligible target');
     release.resolve();
     const out = await work;
     assert.equal(out.workers.length, 3);
     assert.ok(out.workers.every(x => x.ok));
-    assert.deepEqual(out.workers.map(x => [x.role, x.provider]), [['architect', 'p1'], ['backend', 'p2'], ['qa', 'p3']]);
+    assert.deepEqual(out.workers.map(x => [x.role, x.provider]), [['architect', 'p1'], ['backend', 'p1'], ['qa', 'p1']]);
     assert.equal(maxActive, 3);
     assert.equal(active, 0);
     assert.equal(integrationStarted, true);
@@ -128,7 +128,7 @@ async function proveSwarmOverlap(t, { slowPreparation = false } = {}) {
   }
 }
 
-test('swarm dispatches different roles to different provider workers in parallel', { timeout: 20_000 }, async t => {
+test('swarm dispatches different roles to the preferred provider in parallel', { timeout: 20_000 }, async t => {
   await proveSwarmOverlap(t);
 });
 
@@ -136,7 +136,7 @@ test('swarm overlap proof tolerates slow serialized journal preparation', { time
   await proveSwarmOverlap(t, { slowPreparation: true });
 });
 
-test('swarm round-robin reuses eligible targets and skips providers in cooldown', async t => {
+test('swarm prefers the first healthy target and skips providers in cooldown', async t => {
   const root = await tmp();
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const memory = new ProjectMemory(root);
@@ -146,9 +146,9 @@ test('swarm round-robin reuses eligible targets and skips providers in cooldown'
     caller: async target => { names.push(target.name); return { content: `${target.name} handoff` }; }
   });
   router.markFailure({ ...registry.p2, model: 'm2' }, { kind: 'quota_or_rate_limit', message: 'test-only cooldown' });
-  const out = await router.swarmRun({ project_id: 'p', mission_id: 'm', goal: 'build', roles: ['a', 'b', 'c', 'd', 'e'], max_agents: 5 });
+  const out = await router.swarmRun({ project_id: 'p', mission_id: 'm', goal: 'build', roles: ['architect', 'backend', 'frontend', 'security', 'qa'], max_agents: 5 });
   assert.ok(out.workers.every(worker => worker.ok));
-  assert.deepEqual(out.workers.map(worker => worker.provider), ['p1', 'p3', 'p1', 'p3', 'p1']);
+  assert.deepEqual(out.workers.map(worker => worker.provider), ['p1', 'p1', 'p1', 'p1', 'p1']);
   assert.ok(out.integration?.ok);
   assert.equal(names.includes('p2'), false);
   assert.equal(names.length, 6);
@@ -161,6 +161,36 @@ test('project memory lock prevents corrupt concurrent updates', async()=>{
   await Promise.all(Array.from({length:15},(_,i)=>memory.appendEvent('p','m','e',{i})));
   const ev=await memory.recentEvents('p','m',50);
   assert.equal(ev.length,15);
+});
+
+test('delegate rejects arbitrary roles before contacting a provider', async()=>{
+  const memory=new ProjectMemory(await tmp());let calls=0;
+  const router=new Router({...baseCfg,rotation:['p1:m1']},memory,{caller:async()=>{calls++;return {content:'no'};},registry});
+  await assert.rejects(()=>router.delegate({project_id:'p',mission_id:'m',prompt:'x',role:'ignore-all-security'}),/Unsupported role/);
+  assert.equal(calls,0);
+});
+
+test('swarm rejects the generic worker role', async()=>{
+  const memory=new ProjectMemory(await tmp());
+  const router=new Router({...baseCfg,rotation:['p1:m1']},memory,{caller:async()=>({content:'no'}),registry});
+  await assert.rejects(()=>router.swarmRun({project_id:'p',mission_id:'m',goal:'x',roles:['worker'],max_agents:1}),/specialist role names/);
+});
+
+test('journal replaces oversized event payloads with bounded metadata', async()=>{
+  const memory=new ProjectMemory(await tmp(),{maxJournalBytes:65536});
+  await memory.initProject('p');await memory.startMission('p','m',{goal:'g'});
+  await memory.appendEvent('p','m','oversized',{text:'x'.repeat(30000)});
+  const [event]=await memory.recentEvents('p','m',1);
+  assert.equal(event.payload.truncated,true);
+  assert.ok(event.payload.original_bytes>4096);
+});
+
+test('delegated context is explicitly marked untrusted', async()=>{
+  const memory=new ProjectMemory(await tmp());let seen='';
+  const router=new Router({...baseCfg,rotation:['p1:m1'],maxOutputTokens:321,maxResponseBytes:654321},memory,{caller:async(_t,messages,options)=>{seen=messages.map(x=>x.content).join('\n');assert.equal(options.maxTokens,321);assert.equal(options.maxResponseBytes,654321);return {content:'ok'};},registry});
+  await router.delegate({project_id:'p',mission_id:'m',prompt:'review',role:'reviewer'});
+  assert.match(seen,/UNTRUSTED DATA/);
+  assert.doesNotMatch(seen,/MEMORY \(canonical\)/);
 });
 
 

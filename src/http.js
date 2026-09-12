@@ -45,7 +45,7 @@ export function startHttp(cfg, router, memory, mcpHandler) {
       // Browsers must be explicitly trusted; absence of Origin is normal for MCP CLIs.
       if (req.headers.origin && !allowedOrigins.has(req.headers.origin)) return send(res, 403, {error:'origin_not_allowed'});
       if (!authorized(req, cfg.token)) return send(res, 401, {error:'unauthorized'});
-      if (req.method === 'GET' && url.pathname === '/healthz') return send(res,200,{ok:true,service:'dz23-subagents-universal',version:'2.2.4'});
+      if (req.method === 'GET' && url.pathname === '/healthz') return send(res,200,{ok:true,service:'dz23-subagents-universal',version:'2.2.5'});
       if (req.method === 'GET' && url.pathname === '/api/models') return send(res,200,router.listModels());
       if (req.method === 'GET' && url.pathname === '/api/providers') return send(res,200,router.inventory());
       if (req.method === 'GET' && url.pathname === '/api/discover') return send(res,200,await router.discover({provider:url.searchParams.get('provider')||undefined,refresh:url.searchParams.get('refresh')==='true'}));

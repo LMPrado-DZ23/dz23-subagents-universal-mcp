@@ -11,10 +11,11 @@ function loadDotEnv(file=new URL('../.env', import.meta.url)){
   if(!fs.existsSync(file)) return; const lines=fs.readFileSync(file,'utf8').split(/\r?\n/);
   for(const line of lines){const m=line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);if(!m||m[1] in process.env)continue;let v=m[2];if((v.startsWith('"')&&v.endsWith('"'))||(v.startsWith("'")&&v.endsWith("'")))v=v.slice(1,-1);process.env[m[1]]=v;}
 }
-loadDotEnv(); const cfg=config(); const memory=new ProjectMemory(cfg.stateDir); const router=new Router(cfg,memory); const handler=createMcpHandler(router,memory);
+loadDotEnv(); const cfg=config(); const memory=new ProjectMemory(cfg.stateDir,cfg); const router=new Router(cfg,memory); const handler=createMcpHandler(router,memory);
 async function stdio(){
-  process.stdin.setEncoding('utf8'); let buf='';
-  process.stdin.on('data',async chunk=>{buf+=chunk;let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i).trim();buf=buf.slice(i+1);if(!line)continue;let msg;try{msg=JSON.parse(line);}catch{continue;}try{const r=await handler(msg);if(msg.id!==undefined&&r!==null)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:r})+'\n');}catch(e){if(msg.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,error:{code:-32000,message:e.message}})+'\n');}}});
+  process.stdin.setEncoding('utf8'); let buf='';let chain=Promise.resolve();
+  const handleLine=async line=>{let msg;try{msg=JSON.parse(line);}catch{return;}try{const r=await handler(msg);if(msg.id!==undefined&&r!==null)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,result:r})+'\n');}catch(e){if(msg.id!==undefined)process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:msg.id,error:{code:-32000,message:e.message}})+'\n');}};
+  process.stdin.on('data',chunk=>{buf+=chunk;if(Buffer.byteLength(buf)>cfg.maxStdioFrameBytes&&!buf.includes('\n')){buf='';process.stderr.write('Rejected oversized MCP stdio frame\n');return;}let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i).trim();buf=buf.slice(i+1);if(!line)continue;if(Buffer.byteLength(line)>cfg.maxStdioFrameBytes){process.stderr.write('Rejected oversized MCP stdio frame\n');continue;}chain=chain.then(()=>handleLine(line));}});
 }
 const mode=process.argv.includes('--http')?'http':'stdio';
-if(mode==='http'){const server=await startHttp(cfg,router,memory,handler);const a=server.address();console.error(`DZ23 Subagents HTTP MCP listening on http://${cfg.host}:${a.port}`);}else{await stdio();}
+if(mode==='http'){if(!cfg.allowHttp)throw new Error('HTTP mode is disabled; set DZ23_ALLOW_HTTP=true only after configuring authentication and authorization');const server=await startHttp(cfg,router,memory,handler);const a=server.address();console.error(`DZ23 Subagents HTTP MCP listening on http://${cfg.host}:${a.port}`);}else{await stdio();}
