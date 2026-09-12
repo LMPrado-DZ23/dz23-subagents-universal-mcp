@@ -1,0 +1,33 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "dz23-subagents-universal-mcp-2.2.4-source",
+  "documentNamespace": "https://dz23.example/spdx/subagents-2.2.4-20260912",
+  "creationInfo": {
+    "created": "2026-09-12T03:00:00Z",
+    "creators": [
+      "Tool: DZ23 source release inventory"
+    ]
+  },
+  "packages": [
+    {
+      "name": "@dz23/subagents-universal-mcp",
+      "SPDXID": "SPDXRef-Package",
+      "versionInfo": "2.2.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "licenseDeclared": "MIT",
+      "copyrightText": "Copyright (c) 2026 DZ23",
+      "comment": "Source package only; no runtime npm dependencies. Node.js, OS/container layers and GitHub Actions not exhaustively inventoried."
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relationshipType": "DESCRIBES",
+      "relatedSpdxElement": "SPDXRef-Package"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+services:
+  dz23-subagents:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DZ23_STATE_DIR: /state
+      DZ23_HTTP_HOST: 0.0.0.0
+      DZ23_HTTP_PORT: 8787
+    volumes:
+      - dz23_subagents_state:/state
+    ports:
+      - "127.0.0.1:8787:8787"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+volumes:
+  dz23_subagents_state:

@@ -1,0 +1,10 @@
+.git
+.env
+.env.*
+secrets
+state
+.dz23-state
+.dz23-subagents
+node_modules
+*.log
+config/generated

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "dz23-subagents": {
+      "command": "node",
+      "args": ["/ABSOLUTE/PATH/DZ23-Subagents-v2.2.4/src/index.js", "--stdio"]
+    }
+  }
+}

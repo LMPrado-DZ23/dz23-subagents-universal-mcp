@@ -1,0 +1,12 @@
+DZ23 Subagents Universal MCP
+Copyright (c) 2026 DZ23
+
+The MIT license in the supplied v2.2.2 source package is preserved.
+This distribution contains no vendored third-party runtime libraries and has no
+npm runtime dependencies. Node.js, container base images and CI actions are separate
+components governed by their own licenses and maintenance policies.
+
+Provider/client names identify interoperability targets only, not endorsements.
+API subscriptions, quotas, terms and user credentials are not distributed here.
+The supplied source does not establish historical provenance of every earlier
+artifact; this notice is not a legal audit of unrelated repositories.

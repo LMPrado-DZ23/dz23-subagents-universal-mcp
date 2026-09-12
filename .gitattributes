@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+# Preserve batch file bytes so the release hashes survive Git checkout/archive.
+*.cmd -text

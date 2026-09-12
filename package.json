@@ -1,0 +1,38 @@
+{
+  "name": "@dz23/subagents-universal-mcp",
+  "version": "2.2.4",
+  "description": "MCP text delegation router with shared mission memory and bounded parallel model workers",
+  "type": "module",
+  "bin": {
+    "dz23-subagents": "./src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js --stdio",
+    "start:http": "node src/index.js --http",
+    "test": "node --test",
+    "check": "node scripts/check.mjs",
+    "check:release": "node scripts/release-check.mjs",
+    "publish:github": "node scripts/publish-github.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LMPrado-DZ23/dz23-subagents-universal-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LMPrado-DZ23/dz23-subagents-universal-mcp/issues"
+  },
+  "homepage": "https://github.com/LMPrado-DZ23/dz23-subagents-universal-mcp#readme",
+  "keywords": [
+    "mcp",
+    "subagents",
+    "model-router",
+    "shared-memory",
+    "ai",
+    "self-hosted"
+  ]
+}

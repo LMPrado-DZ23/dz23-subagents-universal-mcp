@@ -1,0 +1,4 @@
+HTTP MCP endpoint: https://YOUR_CONFIGURED_HOST/mcp
+Bearer token required from private runtime configuration.
+Set exact DZ23_ALLOWED_HOSTS and, only if needed, DZ23_ALLOWED_ORIGINS.
+Read docs/INSTALL_ANY_HARNESS.md. Hosted client compatibility is not certified.

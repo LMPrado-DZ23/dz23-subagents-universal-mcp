@@ -1,0 +1,25 @@
+DZ23 SUBAGENTS UNIVERSAL MCP 2.2.4 — PACOTE OPEN-SOURCE
+
+Uma única pasta. Sem ZIP antigo, sem bundle duplicado e sem chaves reais.
+
+PARA INSTALAR
+1. Leia README.md e SECURITY.md. Requer Node.js 22+.
+2. Linux/macOS: bash scripts/install-local.sh
+   Windows PowerShell: ./scripts/install-windows.ps1
+3. O instalador cria .env a partir de .env.example apenas se ele ainda não existe.
+4. Configure o endpoint/modelo que realmente está disponível. Não publique o .env.
+5. Revise config/generated e acrescente somente a entrada MCP ao seu harness.
+   Alternativa: entregue HERMES_SELF_INSTALL_PROMPT.txt ao agente no computador alvo.
+
+PARA PUBLICAR
+Windows: extraia em uma pasta nova e abra PUBLICAR_WINDOWS.cmd com dois cliques.
+Ele encontra a pasta do projeto sozinho e executa o publicador com todos os gates.
+Nao precisa repetir o login gh se ja estiver autenticado.
+
+Leia docs/PUBLISH_GITHUB.md ou entregue PUBLICAR_COM_HARNESS.txt a um agente com
+terminal e GitHub autenticado. O pacote ainda NÃO comprova publicação no GitHub.
+Primeiro teste: node scripts/publish-github.mjs --public --dry-run
+
+ATUALIZAÇÃO
+Preserve o .env e a pasta DZ23_STATE_DIR fora do repositório público. Não há migração
+ou exclusão automática. Verifique os IDs e as configurações conforme CHANGELOG.md.

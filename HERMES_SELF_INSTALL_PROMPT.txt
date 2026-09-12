@@ -1,0 +1,30 @@
+Instale o DZ23 Subagents Universal MCP desta pasta no computador autorizado.
+
+Comece lendo README.md, SECURITY.md, docs/INSTALL_ANY_HARNESS.md e package.json.
+Audite o diretório sem imprimir segredos. Não altere outros projetos, Click Matrix,
+a11y, artefatos sob aceitação ou entradas MCP existentes. Faça backup das configurações
+que precisar editar. Não suponha ter permissões de shell se o host não as oferecer.
+
+Verifique Node.js 22+, rode npm run check, npm test e npm run check:release.
+Crie .env a partir de .env.example somente se ausente. Preserve o estado existente.
+Use variáveis de ambiente/arquivos de segredo no runtime; não cole valores no chat.
+Não use provider cloud/pago sem autorização e sem limites de custo definidos na conta.
+
+Execute node scripts/install-harness.mjs all. Revise caminhos reais e apenas acrescente
+a entrada dz23-subagents no formato suportado pelo host; nunca substitua o arquivo
+inteiro. Para Hermes/outros, descubra a configuração real antes de gravar. Reinício de
+sessões ativas requer cuidado; não mate processos de outros projetos.
+
+Teste initialize, tools/list, provider_inventory, project_init e mission_status com
+IDs sintéticos. Teste chamadas externas apenas com credenciais autorizadas e modelo
+confirmado. Verifique erro de quota/failover com fixtures locais. Teste handoff entre
+duas sessões conectadas à MESMA memória e confira checkpoints; não alegue integração
+com um host que não abriu. Os workers produzem texto; o harness aplica e testa código.
+
+HTTP fora de loopback exige token aleatório de 32+ caracteres e TLS/reverse proxy.
+Não exponha esta instância single-tenant como serviço público para usuários não confiáveis.
+Não apague a memória para resolver problemas. Se faltarem credenciais/permissões,
+registre BLOCKED_BY_EXTERNAL_DEPENDENCY e informe a ação específica sem inventar sucesso.
+
+Entregue a entrada MCP final sem secrets, versões, comandos realmente executados,
+resultado de cada teste, estado do processo e pendências externas. Não diga 100% pronto.

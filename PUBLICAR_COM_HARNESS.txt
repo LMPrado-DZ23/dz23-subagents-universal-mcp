@@ -1,0 +1,36 @@
+Publique o código desta pasta como um NOVO repositório público:
+LMPrado-DZ23/dz23-subagents-universal-mcp.
+
+A publicação foi solicitada pelo proprietário. Não altere outros repositórios,
+projetos, serviços, Click Matrix/a11y ou artefatos sob aceitação.
+
+Leia docs/PUBLISH_GITHUB.md, SECURITY.md, CHANGELOG.md e PUBLIC_FILES.json.
+Preserve a licença MIT existente. Não inclua .env, credenciais, memória de projetos,
+logs, backups, ZIPs anteriores ou configurações geradas com caminhos locais.
+Não copie chaves desta conversa. Não solicite tokens em chat; use autenticação
+GitHub CLI no computador do proprietário e o armazenamento de credenciais do sistema.
+
+Rode:
+  npm run check
+  npm test
+  npm run check:release
+  node scripts/publish-github.mjs --public --dry-run
+
+Confira Git/gh. Quando precisar de autenticação, o proprietário deve usar no próprio
+computador: gh auth login --hostname github.com --git-protocol https --web --scopes workflow
+Não divulgue códigos de login/tokens. Verifique que a conta é LMPrado-DZ23.
+Depois rode:
+  node scripts/publish-github.mjs --public
+
+O script é somente para primeira publicação; rejeita .git existente ou nome já usado.
+Não mude visibilidade nem faça force-push para contornar esse bloqueio. Se uma
+publicação parcial criou um repositório remoto, siga a recuperação documentada sem
+deletar nada automaticamente.
+
+Verifique repositório PUBLIC, commit remoto igual ao commit local e arquivos publicados.
+Acompanhe GitHub Actions no ambiente autorizado. Não afirme CI aprovado só porque
+há um workflow. Se possível habilite private vulnerability reporting no repositório,
+sem fazer assinatura paga nem mudar políticas da organização.
+
+Informe URL real, commit, licença, CI executado e qualquer bloqueio. Se faltar
+permissão/autenticação, use BLOCKED_BY_EXTERNAL_DEPENDENCY; nunca invente publicação.
