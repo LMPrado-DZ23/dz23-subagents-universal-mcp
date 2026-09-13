@@ -8,6 +8,8 @@ import {eligibleTargets, isEligible, targetKey} from './targets.js';
 import {buildMessages} from './prompts.js';
 import {nullLogger} from './logger.js';
 import {BudgetLedger} from './budget.js';
+import {planRouting, observeRouting, pickReviewer} from './routing.js';
+import {heuristicSynthesis} from './consensus.js';
 
 export const rolesDefault = [...SWARM_ROLES];
 const allowedRoles = new Set(ROLES);
@@ -51,6 +53,7 @@ export class Router {
     this.clock = clock;
     this.exhausted = new Map();
     this.discoveryCache = new Map();
+    this.latency = new Map();
     this.limiter = new ConcurrencyLimiter(cfg.maxConcurrency || 7, cfg.maxWorkersPerTarget || 4, cfg.maxQueue || 32);
     this.retry = {maxRetries: cfg.maxRetries ?? 1, baseDelayMs: cfg.retryBaseDelayMs ?? 500, capMs: cfg.retryAfterCapMs ?? 30_000};
     this.budget = budget || new BudgetLedger(cfg, memory, {clock, metrics});
@@ -73,8 +76,19 @@ export class Router {
   }
 
   recordLatency(target, ms) {
-    this.metrics?.observe('provider_latency_ms', ms, {target: targetKey(target)});
-    this.metrics?.recordLatency(targetKey(target), ms);
+    const key = targetKey(target);
+    const current = this.latency.get(key);
+    this.latency.set(key, current === undefined ? ms : current + 0.3 * (ms - current));
+    this.metrics?.observe('provider_latency_ms', ms, {target: key});
+    this.metrics?.recordLatency(key, ms);
+  }
+
+  latencyOf(target) {
+    return this.latency.get(targetKey(target)) ?? null;
+  }
+
+  routingHelpers() {
+    return {priceOf: target => this.budget.priceFor(target), latencyOf: target => this.latencyOf(target)};
   }
 
   targets() {
@@ -294,14 +308,42 @@ export class Router {
     throw new ToolError('all_providers_failed', 'All eligible providers failed', {attempts, ...(denials.length ? {budget_denials: denials} : {})});
   }
 
-  async consensus({project_id = 'default', mission_id = crypto.randomUUID(), prompt, models = 3, request_id} = {}) {
+  /** Independent reviewers on distinct targets, observed diversity and an optional synthesis. */
+  async consensus({project_id = 'default', mission_id = crypto.randomUUID(), prompt, models = 3, routing_strategy = 'round_robin', min_distinct_providers, min_distinct_models,
+    strict_diversity = false, synthesis = 'heuristic', request_id} = {}) {
+    if (!prompt) throw new ToolError('invalid_request', 'prompt is required');
+    const targets = this.availableTargets();
+    if (!targets.length) throw new ToolError('no_providers', 'No eligible providers are configured or all are cooling down', {cooldowns: this.cooldowns()});
+    const requested = Math.max(2, Math.min(5, models));
+    const helpers = this.routingHelpers();
+    const plan = planRouting({targets, count: requested, strategy: routing_strategy, minDistinctProviders: min_distinct_providers, minDistinctModels: min_distinct_models,
+      strict: strict_diversity, distinctOnly: true, ...helpers});
     await this.ensureMission(project_id, mission_id, prompt);
-    const targets = this.availableTargets().slice(0, Math.max(2, Math.min(5, models)));
-    const settled = await Promise.allSettled(targets.map(t => this.delegate({project_id, mission_id, prompt, role: 'reviewer', target: targetKey(t), request_id})));
-    return settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, provider: targets[i]?.name, ...failureSummary(s.reason)});
+    const settled = await Promise.allSettled(plan.assignments.map(target => this.delegate({project_id, mission_id, prompt, role: 'reviewer', target: targetKey(target), request_id})));
+    const responses = settled.map((s, i) => s.status === 'fulfilled'
+      ? {ok: true, provider: s.value.provider, model: s.value.model, content: s.value.content, usage: s.value.usage, attempts: s.value.attempts}
+      : {ok: false, provider: plan.assignments[i].name, model: plan.assignments[i].model, ...failureSummary(s.reason)});
+    const received = responses.filter(response => response.ok);
+    let result = null;
+    if (synthesis !== 'none' && received.length) {
+      result = heuristicSynthesis(received);
+      if (synthesis === 'model' && received.length >= 2) {
+        const pick = pickReviewer(this.availableTargets(), new Set(received.map(r => `${r.provider}:${r.model}`)), routing_strategy, helpers);
+        try {
+          const out = await this.delegate({project_id, mission_id, role: 'reviewer', request_id, target: pick.target ? targetKey(pick.target) : 'auto',
+            prompt: `Synthesize the independent reviewer answers stored in mission memory. List agreements, contradictions and claims nobody verified. Do not present agreement as objective truth. Question: ${prompt}`});
+          result.model = {ok: true, provider: out.provider, model: out.model, content: out.content, usage: out.usage};
+        } catch (error) {
+          result.model = {ok: false, ...failureSummary(error)};
+        }
+      }
+    }
+    return {project_id, mission_id, requested, planned: plan.assignments.length, received: received.length, failed: responses.length - received.length,
+      responses, routing: observeRouting(plan.routing, responses), synthesis: result};
   }
 
-  async swarmRun({project_id = 'default', mission_id = crypto.randomUUID(), goal, roles = rolesDefault, max_agents, request_id} = {}) {
+  async swarmRun({project_id = 'default', mission_id = crypto.randomUUID(), goal, roles = rolesDefault, max_agents, routing_strategy = 'first', min_distinct_providers,
+    min_distinct_models, strict_diversity = false, avoid_reviewer_target = false, request_id} = {}) {
     if (!goal) throw new ToolError('invalid_request', 'goal is required');
     if (!Array.isArray(roles) || !roles.length || roles.some(r => typeof r !== 'string' || !allowedSwarmRoles.has(r))) {
       throw new ToolError('invalid_request', 'roles must be a nonempty array of supported specialist role names');
@@ -313,11 +355,14 @@ export class Router {
     const started = this.clock();
     const requested = Math.max(1, Math.min(max_agents || this.cfg.maxConcurrency, this.cfg.maxConcurrency, 7));
     const selected = Array.from({length: requested}, (_, i) => roles[i % roles.length]);
-    log.info('swarm_started', {workers: selected.length});
+    const helpers = this.routingHelpers();
+    const plan = planRouting({targets, count: selected.length, strategy: routing_strategy, minDistinctProviders: min_distinct_providers,
+      minDistinctModels: min_distinct_models, strict: strict_diversity, ...helpers});
+    log.info('swarm_started', {workers: selected.length, requested_strategy: plan.routing.requested_strategy, effective_strategy: plan.routing.effective_strategy});
     await this.memory.updateMission(project_id, mission_id, {active_tasks: selected.map((role, i) => ({id: `${role}-${i + 1}`, role, status: 'running'}))});
-    // Every role starts on the preferred target; delegate() handles ordered failover and
+    // Each worker starts on its planned target; delegate() handles ordered failover and
     // the shared limiter enforces total and per-target in-flight call limits.
-    const workers = selected.map((role, i) => this.delegate({project_id, mission_id, goal, role, request_id, target: targetKey(targets[0]), metadata: {worker_index: i + 1},
+    const workers = selected.map((role, i) => this.delegate({project_id, mission_id, goal, role, request_id, target: targetKey(plan.assignments[i]), metadata: {worker_index: i + 1},
       prompt: `Work independently on this project goal from your specialization. Coordinate through shared memory. Do not overwrite another agent's unmerged work. Goal: ${goal}`}));
     const settled = await Promise.allSettled(workers);
     for (const s of settled) {
@@ -329,10 +374,21 @@ export class Router {
     const current = await this.memory.getMission(project_id, mission_id);
     await this.memory.updateMission(project_id, mission_id, {active_tasks: [], completed_tasks: uniq([...(current.completed_tasks || []), ...okRoles]),
       blocked_tasks: [...(current.blocked_tasks || []), ...failed], swarm_last_run: {at: isoNow(), roles: selected, count: selected.length}});
+    let reviewerTarget = 'auto';
+    let reviewer = null;
+    if (avoid_reviewer_target && outputs.some(x => x.ok)) {
+      const used = new Set(outputs.filter(x => x.ok).map(x => `${x.provider}:${x.model}`));
+      const pick = pickReviewer(this.availableTargets(), used, routing_strategy, helpers);
+      if (pick.target) {
+        reviewerTarget = targetKey(pick.target);
+        reviewer = {planned_target: reviewerTarget, shares_worker_target: pick.shares_worker_target};
+        if (pick.shares_worker_target) plan.routing.warnings.push('avoid_reviewer_target: no eligible target outside the worker targets');
+      }
+    }
     let integration = null;
     if (outputs.some(x => x.ok)) {
       try {
-        integration = await this.delegate({project_id, mission_id, role: 'reviewer', target: 'auto', request_id,
+        integration = await this.delegate({project_id, mission_id, role: 'reviewer', target: reviewerTarget, request_id,
           prompt: `Integrate and review the parallel agent outputs now stored in mission memory. Resolve contradictions, identify what is actually proven, and produce a single prioritized continuation plan for the harness. Goal: ${goal}`});
       } catch (error) {
         integration = {ok: false, ...failureSummary(error)};
@@ -340,6 +396,8 @@ export class Router {
     }
     await this.memory.checkpoint(project_id, mission_id, {status: failed.length ? 'partial' : 'active', next_action: 'Harness should inspect working tree/tests, then execute the reviewer continuation plan.'});
     log.info('swarm_completed', {workers_ok: okRoles.length, workers_failed: failed.length, integration_ok: Boolean(integration?.ok), duration_ms: this.clock() - started});
-    return {project_id, mission_id, workers: outputs, integration};
+    const routing = observeRouting(plan.routing, outputs);
+    if (reviewer) routing.reviewer = {...reviewer, ...(integration?.ok ? {provider: integration.provider, model: integration.model} : {})};
+    return {project_id, mission_id, workers: outputs, integration, routing};
   }
 }
