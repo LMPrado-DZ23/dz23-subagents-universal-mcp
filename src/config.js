@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {DEFAULT_COST_WEIGHTS, TOOL_ARGUMENT_ERROR_MODES, LOG_LEVELS} from './constants.js';
+import {parsePriceTable} from './budget.js';
+import {DEFAULT_COST_WEIGHTS, TOOL_ARGUMENT_ERROR_MODES, LOG_LEVELS, COST_POLICIES} from './constants.js';
 import {ConfigError} from './errors.js';
 import {loadMcpToken, loadScopedTokens} from './auth.js';
 
@@ -52,6 +54,53 @@ export function parseWeights(raw) {
     weights[name] = n;
   }
   return weights;
+}
+
+/** Budget amounts fail loudly: silently ignoring a spending limit would be unsafe. */
+function money(env, name) {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) throw new ConfigError(`${name} must be a non-negative number of USD`);
+  return n;
+}
+
+function optionalLimit(env, name, max) {
+  const raw = env[name];
+  if (raw === undefined || raw === '') return null;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > max) throw new ConfigError(`${name} must be an integer between 1 and ${max}`);
+  return n;
+}
+
+function loadPrices(env) {
+  if (env.DZ23_PRICES && env.DZ23_PRICES_FILE) throw new ConfigError('Set only one of DZ23_PRICES or DZ23_PRICES_FILE');
+  let raw = env.DZ23_PRICES;
+  let label = 'DZ23_PRICES';
+  if (env.DZ23_PRICES_FILE) {
+    label = 'DZ23_PRICES_FILE';
+    try { raw = fs.readFileSync(env.DZ23_PRICES_FILE, 'utf8'); } catch { throw new ConfigError('Cannot read DZ23_PRICES_FILE'); }
+  }
+  if (!raw) return {};
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new ConfigError(`${label} must contain valid JSON`); }
+  return parsePriceTable(parsed, label);
+}
+
+export function budgetConfig(env = process.env) {
+  const policy = env.DZ23_COST_POLICY || 'allow_unknown_cost';
+  if (!COST_POLICIES.includes(policy)) throw new ConfigError(`DZ23_COST_POLICY must be one of: ${COST_POLICIES.join(', ')}`);
+  return {
+    missionCostUsd: money(env, 'DZ23_MAX_MISSION_COST_USD'),
+    projectCostUsd: money(env, 'DZ23_MAX_PROJECT_COST_USD'),
+    dailyCostUsd: money(env, 'DZ23_MAX_DAILY_COST_USD'),
+    callCostUsd: money(env, 'DZ23_MAX_CALL_COST_USD'),
+    missionTokens: optionalLimit(env, 'DZ23_MAX_MISSION_TOKENS', 1_000_000_000),
+    missionCalls: optionalLimit(env, 'DZ23_MAX_MISSION_CALLS', 1_000_000),
+    inputTokens: optionalLimit(env, 'DZ23_MAX_INPUT_TOKENS', 10_000_000),
+    policy,
+    prices: loadPrices(env)
+  };
 }
 
 export function config(env = process.env) {
@@ -122,6 +171,7 @@ export function config(env = process.env) {
       socketTimeoutMs: int('DZ23_HTTP_SOCKET_TIMEOUT_MS', 15 * 60_000, 10_000, 3_600_000)
     },
     shutdownGraceMs: int('DZ23_SHUTDOWN_GRACE_MS', 10_000, 0, 120_000),
+    budget: budgetConfig(env),
     configIssues: issues
   };
 }

@@ -67,6 +67,7 @@ const TOOL_ERROR_HTTP_STATUS = {
   all_providers_failed: 502,
   no_providers: 503,
   lock_timeout: 503,
+  memory_write_failed: 503,
   memory_integrity: 500
 };
 

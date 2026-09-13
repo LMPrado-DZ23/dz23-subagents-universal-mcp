@@ -7,6 +7,7 @@ import {COOLDOWN_MS, NO_FAILOVER_KINDS, ROLES, SWARM_ROLES} from './constants.js
 import {eligibleTargets, isEligible, targetKey} from './targets.js';
 import {buildMessages} from './prompts.js';
 import {nullLogger} from './logger.js';
+import {BudgetLedger} from './budget.js';
 
 export const rolesDefault = [...SWARM_ROLES];
 const allowedRoles = new Set(ROLES);
@@ -30,8 +31,14 @@ function attemptRecord(error, attempt) {
   };
 }
 
+/** Expected failures keep their code; anything else is reported generically (details stay in logs). */
+function failureSummary(reason) {
+  if (reason instanceof ToolError) return {code: reason.code, error: safeText(reason.message, 300)};
+  return {code: 'internal_error', error: 'Unexpected failure; see server logs for this request_id'};
+}
+
 export class Router {
-  constructor(cfg, memory, {caller = callProvider, registry, discoverer = discoverModels, logger = nullLogger, metrics = null, sleep = realSleep, random = Math.random, clock = Date.now} = {}) {
+  constructor(cfg, memory, {caller = callProvider, registry, discoverer = discoverModels, logger = nullLogger, metrics = null, sleep = realSleep, random = Math.random, clock = Date.now, budget} = {}) {
     this.cfg = cfg;
     this.memory = memory;
     this.caller = caller;
@@ -46,6 +53,7 @@ export class Router {
     this.discoveryCache = new Map();
     this.limiter = new ConcurrencyLimiter(cfg.maxConcurrency || 7, cfg.maxWorkersPerTarget || 4, cfg.maxQueue || 32);
     this.retry = {maxRetries: cfg.maxRetries ?? 1, baseDelayMs: cfg.retryBaseDelayMs ?? 500, capMs: cfg.retryAfterCapMs ?? 30_000};
+    this.budget = budget || new BudgetLedger(cfg, memory, {clock, metrics});
     logger.addSecrets?.(Object.values(this.registry).map(provider => provider.apiKey));
     if (metrics) {
       metrics.gauge('active_calls', () => this.limiter.active);
@@ -108,21 +116,37 @@ export class Router {
     });
   }
 
+  /** Tiny real generation per target. Respects the daily/call cost limits and the unknown-cost policy. */
   async healthCheck({request_id} = {}) {
     const log = this.logger.child({request_id});
+    const messages = [{role: 'user', content: 'Reply only OK'}];
     return Promise.all(this.targets().map(async target => {
-      const started = this.clock();
+      const base = {provider: target.name, model: target.model};
+      let admission;
       try {
-        await this.callTarget(target, [{role: 'user', content: 'Reply only OK'}], {timeoutMs: this.cfg.healthTimeoutMs, maxTokens: 8});
+        admission = await this.budget.admit({target, messages, maxOutputTokens: 8, scope: 'system'});
+      } catch (error) {
+        if (!(error instanceof ToolError)) throw error;
+        return {...base, ok: false, latency_ms: 0, kind: 'budget_exceeded', reason: error.details?.limit || error.code};
+      }
+      if (admission.denied) return {...base, ok: false, latency_ms: 0, kind: 'budget_exceeded', reason: admission.denied};
+      const started = this.clock();
+      const settleDetails = {target, role: 'health_check', request_id};
+      try {
+        const output = await this.callTarget(target, messages, {timeoutMs: this.cfg.healthTimeoutMs, maxTokens: 8});
         const latency = this.clock() - started;
-        log.info('health_check_target', {provider: target.name, model: target.model, status: 'success', duration_ms: latency});
-        return {provider: target.name, model: target.model, ok: true, latency_ms: latency};
+        const usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
+        log.info('health_check_target', {...base, status: 'success', duration_ms: latency});
+        return {...base, ok: true, latency_ms: latency, usage};
       } catch (raw) {
         const error = toProviderError(raw, target);
         const latency = this.clock() - started;
+        await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
         this.metrics?.increment('provider_failures_total', {kind: error.kind});
-        log.warn('health_check_target', {provider: target.name, model: target.model, status: 'failed', kind: error.kind, http_status: error.status, duration_ms: latency});
-        return {provider: target.name, model: target.model, ok: false, latency_ms: latency, kind: error.kind, retryable: error.retryable, ...(error.status ? {http_status: error.status} : {}), error: safeText(error.message, 300)};
+        log.warn('health_check_target', {...base, status: 'failed', kind: error.kind, http_status: error.status, duration_ms: latency});
+        return {...base, ok: false, latency_ms: latency, kind: error.kind, retryable: error.retryable, ...(error.status ? {http_status: error.status} : {}), error: safeText(error.message, 300)};
+      } finally {
+        this.budget.release(admission.reservation);
       }
     }));
   }
@@ -169,31 +193,50 @@ export class Router {
     return Math.min(this.retry.capMs, Math.max(error.retryAfterMs || 0, backoff + jitter));
   }
 
-  /** Bounded retries on one target for retryable kinds; returns the final outcome for that target. */
+  /**
+   * Bounded retries on one target for retryable kinds. Every attempt is admitted by the
+   * budget first (no provider call when denied) and settled afterwards, retries included.
+   */
   async attemptTarget(target, messages, {project_id, mission_id, role, request_id, log}) {
     const attempts = [];
     const startedAt = this.clock();
+    const maxTokens = this.cfg.maxOutputTokens || 4096;
+    const settleDetails = {target, project_id, mission_id, role, request_id};
     for (let attempt = 1; ; attempt++) {
-      const callStarted = this.clock();
-      await this.memory.appendEvent(project_id, mission_id, 'agent_attempt', {role, provider: target.name, model: target.model, attempt, request_id});
-      log.debug('provider_call_started', {provider: target.name, model: target.model, attempt});
+      const admission = await this.budget.admit({project_id, mission_id, target, messages, maxOutputTokens: maxTokens});
+      if (admission.denied) {
+        log.warn('budget_denied', {provider: target.name, model: target.model, reason: admission.denied, estimated_cost_usd: admission.estimated_cost_usd ?? undefined});
+        return {ok: false, attempts, startedAt, denied: {target: targetKey(target), reason: admission.denied, ...(admission.estimated_cost_usd != null ? {estimated_cost_usd: admission.estimated_cost_usd} : {})}};
+      }
       try {
-        const output = await this.callTarget(target, messages, {timeoutMs: this.cfg.timeoutMs, maxTokens: this.cfg.maxOutputTokens || 4096, maxResponseBytes: this.cfg.maxResponseBytes || 2 * 1024 * 1024});
+        const callStarted = this.clock();
+        await this.memory.appendEvent(project_id, mission_id, 'agent_attempt', {role, provider: target.name, model: target.model, attempt, request_id});
+        log.debug('provider_call_started', {provider: target.name, model: target.model, attempt});
+        let output;
+        try {
+          output = await this.callTarget(target, messages, {timeoutMs: this.cfg.timeoutMs, maxTokens, maxResponseBytes: this.cfg.maxResponseBytes || 2 * 1024 * 1024});
+        } catch (raw) {
+          const error = toProviderError(raw, target);
+          await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
+          attempts.push(attemptRecord(error, attempt));
+          this.metrics?.increment('provider_failures_total', {kind: error.kind});
+          log.warn('provider_call_failed', {provider: target.name, model: target.model, attempt, duration_ms: this.clock() - callStarted, status: 'failed',
+            kind: error.kind, retryable: error.retryable, http_status: error.status, retry_after_ms: error.retryAfterMs || undefined});
+          await this.memory.appendEvent(project_id, mission_id, 'provider_failed', {role, provider: target.name, model: target.model, attempt, kind: error.kind,
+            retryable: error.retryable, http_status: error.status, retry_after_ms: error.retryAfterMs || 0, request_id, error: safeText(error.message, 300)});
+          const delay = this.retryDelay(error, attempt);
+          if (delay === null) return {ok: false, error, attempts, startedAt};
+          this.metrics?.increment('provider_retries_total', {kind: error.kind});
+          await this.sleep(delay);
+          continue;
+        }
         const latencyMs = this.clock() - callStarted;
-        log.info('provider_call_completed', {provider: target.name, model: target.model, attempt, duration_ms: latencyMs, status: 'success'});
-        return {ok: true, output, attempts, startedAt, latencyMs};
-      } catch (raw) {
-        const error = toProviderError(raw, target);
-        attempts.push(attemptRecord(error, attempt));
-        this.metrics?.increment('provider_failures_total', {kind: error.kind});
-        log.warn('provider_call_failed', {provider: target.name, model: target.model, attempt, duration_ms: this.clock() - callStarted, status: 'failed',
-          kind: error.kind, retryable: error.retryable, http_status: error.status, retry_after_ms: error.retryAfterMs || undefined});
-        await this.memory.appendEvent(project_id, mission_id, 'provider_failed', {role, provider: target.name, model: target.model, attempt, kind: error.kind,
-          retryable: error.retryable, http_status: error.status, retry_after_ms: error.retryAfterMs || 0, request_id, error: safeText(error.message, 300)});
-        const delay = this.retryDelay(error, attempt);
-        if (delay === null) return {ok: false, error, attempts, startedAt};
-        this.metrics?.increment('provider_retries_total', {kind: error.kind});
-        await this.sleep(delay);
+        const usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
+        log.info('provider_call_completed', {provider: target.name, model: target.model, attempt, duration_ms: latencyMs, status: 'success',
+          input_tokens: usage.input_tokens, output_tokens: usage.output_tokens, token_source: usage.token_source, estimated_cost_usd: usage.estimated_cost_usd, cost_source: usage.cost_source});
+        return {ok: true, output, usage, attempts, startedAt, latencyMs};
+      } finally {
+        this.budget.release(admission.reservation);
       }
     }
   }
@@ -213,21 +256,28 @@ export class Router {
     this.metrics?.increment('delegations_total', {role});
     const assignment = prompt || goal;
     const attempts = [];
+    const denials = [];
     let context = await this.contextFor(project_id, mission_id);
     for (const [index, candidate] of candidates.entries()) {
-      if (index > 0) {
+      if (index > 0 && attempts.length) {
         this.metrics?.increment('failovers_total');
         log.info('provider_failover', {provider: candidate.name, model: candidate.model, candidate_index: index});
       }
-      const messages = buildMessages(role, context, assignment, {previousTargetFailed: index > 0});
+      const messages = buildMessages(role, context, assignment, {previousTargetFailed: attempts.length > 0});
       const outcome = await this.attemptTarget(candidate, messages, {project_id, mission_id, role, request_id, log});
       attempts.push(...outcome.attempts);
+      if (outcome.denied) {
+        denials.push(outcome.denied);
+        this.metrics?.increment('budget_denials_total', {reason: outcome.denied.reason});
+        continue;
+      }
       if (outcome.ok) {
         const agent = {id: crypto.randomUUID(), role, provider: candidate.name, model: candidate.model, started_at: new Date(outcome.startedAt).toISOString(), finished_at: isoNow(), status: 'completed'};
         await this.memory.recordAgentResult(project_id, mission_id, agent, outcome.output.content);
         await this.memory.appendEvent(project_id, mission_id, 'delegation_completed', {role, provider: candidate.name, model: candidate.model, latency_ms: outcome.latencyMs, failed_attempts: attempts.length, request_id});
         await this.memory.checkpoint(project_id, mission_id, {next_action: 'Continue from the latest agent handoff and verify repository state before editing.'});
-        return {ok: true, project_id, mission_id, role, provider: candidate.name, model: candidate.model, content: outcome.output.content, attempts, ...(request_id ? {request_id} : {})};
+        return {ok: true, project_id, mission_id, role, provider: candidate.name, model: candidate.model, content: outcome.output.content, usage: outcome.usage, attempts,
+          ...(denials.length ? {budget_denials: denials} : {}), ...(request_id ? {request_id} : {})};
       }
       this.markFailure(candidate, outcome.error);
       if (NO_FAILOVER_KINDS.has(outcome.error.kind)) {
@@ -236,15 +286,19 @@ export class Router {
       }
       context = await this.contextFor(project_id, mission_id);
     }
+    if (!attempts.length && denials.length) {
+      await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'budget_exceeded', request_id});
+      throw new ToolError('budget_exceeded', 'No eligible target fits the configured budget or cost policy', {limit: 'target_policy', denials});
+    }
     await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'all_providers_failed', failed_attempts: attempts.length, request_id});
-    throw new ToolError('all_providers_failed', 'All eligible providers failed', {attempts});
+    throw new ToolError('all_providers_failed', 'All eligible providers failed', {attempts, ...(denials.length ? {budget_denials: denials} : {})});
   }
 
   async consensus({project_id = 'default', mission_id = crypto.randomUUID(), prompt, models = 3, request_id} = {}) {
     await this.ensureMission(project_id, mission_id, prompt);
     const targets = this.availableTargets().slice(0, Math.max(2, Math.min(5, models)));
     const settled = await Promise.allSettled(targets.map(t => this.delegate({project_id, mission_id, prompt, role: 'reviewer', target: targetKey(t), request_id})));
-    return settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, provider: targets[i]?.name, error: safeText(s.reason?.message, 300)});
+    return settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, provider: targets[i]?.name, ...failureSummary(s.reason)});
   }
 
   async swarmRun({project_id = 'default', mission_id = crypto.randomUUID(), goal, roles = rolesDefault, max_agents, request_id} = {}) {
@@ -266,7 +320,10 @@ export class Router {
     const workers = selected.map((role, i) => this.delegate({project_id, mission_id, goal, role, request_id, target: targetKey(targets[0]), metadata: {worker_index: i + 1},
       prompt: `Work independently on this project goal from your specialization. Coordinate through shared memory. Do not overwrite another agent's unmerged work. Goal: ${goal}`}));
     const settled = await Promise.allSettled(workers);
-    const outputs = settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, role: selected[i], error: safeText(s.reason?.message, 300), ...(s.reason?.code ? {code: s.reason.code} : {})});
+    for (const s of settled) {
+      if (s.status === 'rejected' && !(s.reason instanceof ToolError)) log.error('swarm_worker_internal_error', {error_name: s.reason?.name, error_code: typeof s.reason?.code === 'string' ? s.reason.code : undefined});
+    }
+    const outputs = settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, role: selected[i], ...failureSummary(s.reason)});
     const okRoles = outputs.filter(x => x.ok).map(x => x.role);
     const failed = outputs.filter(x => !x.ok).map(x => ({role: x.role, error: x.error}));
     const current = await this.memory.getMission(project_id, mission_id);
@@ -278,7 +335,7 @@ export class Router {
         integration = await this.delegate({project_id, mission_id, role: 'reviewer', target: 'auto', request_id,
           prompt: `Integrate and review the parallel agent outputs now stored in mission memory. Resolve contradictions, identify what is actually proven, and produce a single prioritized continuation plan for the harness. Goal: ${goal}`});
       } catch (error) {
-        integration = {ok: false, error: safeText(error.message, 300)};
+        integration = {ok: false, ...failureSummary(error)};
       }
     }
     await this.memory.checkpoint(project_id, mission_id, {status: failed.length ? 'partial' : 'active', next_action: 'Harness should inspect working tree/tests, then execute the reviewer continuation plan.'});

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import {ToolError} from './errors.js';
+import {addUsage} from './usage.js';
 
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const transientLockErrors = new Set(['EEXIST','EPERM','EBUSY','ENOTEMPTY']);
@@ -11,8 +13,40 @@ const safe = s => {
   return s;
 };
 async function ensureDir(p){ await fs.mkdir(p,{recursive:true,mode:0o700}); }
-async function atomicJson(file,obj){ await ensureDir(path.dirname(file)); const tmp=`${file}.${process.pid}.${Date.now()}.tmp`; await fs.writeFile(tmp,JSON.stringify(obj,null,2),{mode:0o600}); await fs.rename(tmp,file); }
-async function readJson(file,fallback){ try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;} }
+// Windows refuses rename/read while another handle briefly holds the file (EPERM/EACCES/EBUSY).
+const transientIoErrors = new Set(['EPERM','EACCES','EBUSY']);
+const IO_RETRIES = 40;
+async function atomicJson(file,obj){
+  await ensureDir(path.dirname(file));
+  const tmp=`${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
+  await fs.writeFile(tmp,JSON.stringify(obj,null,2),{mode:0o600});
+  for(let i=0;;i++){
+    try{await fs.rename(tmp,file);return;}
+    catch(e){
+      if(!transientIoErrors.has(e.code)||i>=IO_RETRIES){await fs.rm(tmp,{force:true}).catch(()=>{});throw new ToolError('memory_write_failed','Memory file stayed busy; the write was not completed');}
+      await sleep(5+Math.random()*10*Math.min(i+1,10));
+    }
+  }
+}
+async function readJson(file,fallback){
+  for(let i=0;;i++){
+    try{return JSON.parse(await fs.readFile(file,'utf8'));}
+    catch(e){
+      if(e.code==='ENOENT')return fallback;
+      if(transientIoErrors.has(e.code)&&i<IO_RETRIES){await sleep(5+Math.random()*10);continue;}
+      throw e;
+    }
+  }
+}
+
+/** Append one line; when the file grows past maxBytes keep only the newest 75%. */
+async function appendBoundedLine(file,line,maxBytes){
+  await ensureDir(path.dirname(file)); await fs.appendFile(file,line+'\n',{mode:0o600});
+  const stat=await fs.stat(file); if(stat.size<=maxBytes)return;
+  const lines=(await fs.readFile(file,'utf8')).trim().split('\n').filter(Boolean); const kept=[]; let bytes=0;
+  for(let i=lines.length-1;i>=0;i--){const size=Buffer.byteLength(lines[i]+'\n');if(bytes+size>Math.floor(maxBytes*0.75))break;kept.unshift(lines[i]);bytes+=size;}
+  await fs.writeFile(file,kept.join('\n')+'\n',{mode:0o600});
+}
 
 const CHECKPOINT_LISTS=['acceptance_criteria','decisions','invariants','completed_tasks','active_tasks','blocked_tasks','next_tasks','known_failures','files_read','files_changed','artifacts'];
 const CHECKPOINT_SCALARS=['next_action','status','summary','goal'];
@@ -31,6 +65,23 @@ export function mergeCheckpointFields(state,fields,merge='append'){
   return patch;
 }
 
+/**
+ * In-process serialization per key (project directory). Readers and writers of one process
+ * never overlap, so Windows cannot refuse a rename because this process holds the file open.
+ * Not reentrant: code inside a locked section must use readJson directly.
+ */
+class KeyedMutex {
+  constructor(){ this.tails=new Map(); }
+  async run(key,fn){
+    const previous=this.tails.get(key)||Promise.resolve();
+    let release; const gate=new Promise(resolve=>{release=resolve;});
+    const tail=previous.then(()=>gate); this.tails.set(key,tail);
+    await previous;
+    try{return await fn();}
+    finally{release(); if(this.tails.get(key)===tail)this.tails.delete(key);}
+  }
+}
+
 export class ProjectMemory {
   constructor(root, options={}){
     this.root=root;
@@ -39,14 +90,16 @@ export class ProjectMemory {
     this.maxJournalBytes=options.maxJournalBytes||1024*1024;
     this.maxEventBytes=Math.max(4096,Math.min(65536,Math.floor(this.maxJournalBytes/4)));
     this.maxCheckpoints=options.maxCheckpoints||8;
+    this.local=new KeyedMutex();
   }
   projectDir(projectId){ return path.join(this.root,'projects',safe(projectId)); }
   missionDir(projectId,missionId){ return path.join(this.projectDir(projectId),'missions',safe(missionId)); }
-  async withLock(projectId, fn){
-    const dir=this.projectDir(projectId); await ensureDir(dir); const lock=path.join(dir,'.lock');
+  async withLock(projectId, fn){ const dir=this.projectDir(projectId); return this.local.run(dir,()=>this.lockAt(dir, fn)); }
+  async lockAt(dir, fn){
+    await ensureDir(dir); const lock=path.join(dir,'.lock');
     let acquired=false;
     for(let i=0;i<500;i++){ try{await fs.mkdir(lock,{mode:0o700});acquired=true;break;}catch(e){if(!transientLockErrors.has(e.code))throw e;await sleep(20+Math.random()*30);} }
-    if(!acquired) throw new Error(`Memory lock timeout for ${projectId}`);
+    if(!acquired) throw new ToolError('lock_timeout',`Memory lock timeout for ${path.basename(dir)}`);
     try{return await fn();}finally{
       for(let i=0;i<20;i++){try{await fs.rm(lock,{recursive:true,force:true});break;}catch(e){if(!transientLockErrors.has(e.code)||i===19)throw e;await sleep(20+Math.random()*30);}}
     }
@@ -60,7 +113,7 @@ export class ProjectMemory {
       Object.assign(obj,data,{updated_at:now}); await atomicJson(file,obj); return obj;
     });
   }
-  async getProject(projectId){return readJson(path.join(this.projectDir(projectId),'project.json'),null);}
+  async getProject(projectId){const dir=this.projectDir(projectId);return this.local.run(dir,()=>readJson(path.join(dir,'project.json'),null));}
   async startMission(projectId, missionId, data={}){
     await this.initProject(projectId);
     return this.withLock(projectId, async()=>{
@@ -70,7 +123,7 @@ export class ProjectMemory {
       Object.assign(obj,data,{updated_at:now}); await atomicJson(file,obj); return obj;
     });
   }
-  async getMission(projectId,missionId){return readJson(path.join(this.missionDir(projectId,missionId),'state.json'),null);}
+  async getMission(projectId,missionId){const file=path.join(this.missionDir(projectId,missionId),'state.json');return this.local.run(this.projectDir(projectId),()=>readJson(file,null));}
   async updateMission(projectId,missionId, patch={}){
     return this.withLock(projectId, async()=>{
       const file=path.join(this.missionDir(projectId,missionId),'state.json'); const cur=await readJson(file,null); if(!cur) throw new Error('Mission not found');
@@ -108,13 +161,39 @@ export class ProjectMemory {
   }
   async checkpoint(projectId,missionId, extra={}){
     return this.withLock(projectId, async()=>{
-      const state=await this.getMission(projectId,missionId); if(!state) throw new Error('Mission not found');
+      const state=await readJson(path.join(this.missionDir(projectId,missionId),'state.json'),null); if(!state) throw new ToolError('mission_not_found','Mission not found');
       const seq=(state.sequence||0)+1; const cp={...state,...extra,sequence:seq,checkpoint_at:new Date().toISOString()};
       const dir=path.join(this.missionDir(projectId,missionId),'checkpoints'); await ensureDir(dir); await atomicJson(path.join(dir,`${String(seq).padStart(6,'0')}.json`),cp); await atomicJson(path.join(this.missionDir(projectId,missionId),'state.json'),cp);
       const checkpoints=(await fs.readdir(dir)).filter(x=>/^\d{6}\.json$/.test(x)).sort();
       await Promise.all(checkpoints.slice(0,-this.maxCheckpoints).map(x=>fs.rm(path.join(dir,x),{force:true})));
       return cp;
     });
+  }
+  usageDir(){ return path.join(this.root,'usage','daily'); }
+  async getDailyUsage(day){ return this.local.run(this.usageDir(),()=>readJson(path.join(this.usageDir(),`${day}.json`),null)); }
+  /** Per-call usage: mission totals, bounded usage.jsonl, project totals and the shared daily file. */
+  async recordUsage(projectId,missionId,record){
+    await this.withLock(projectId, async()=>{
+      const dir=this.missionDir(projectId,missionId); const file=path.join(dir,'state.json'); const cur=await readJson(file,null);
+      if(!cur) throw new ToolError('mission_not_found','Mission not found');
+      await atomicJson(file,{...cur,usage:addUsage(cur.usage,record),updated_at:new Date().toISOString()});
+      await appendBoundedLine(path.join(dir,'usage.jsonl'),JSON.stringify(record),this.maxJournalBytes);
+      const projectFile=path.join(this.projectDir(projectId),'project.json'); const project=await readJson(projectFile,null);
+      if(project) await atomicJson(projectFile,{...project,usage_totals:addUsage(project.usage_totals,record)});
+    });
+    return this.recordSystemUsage(record);
+  }
+  async recordSystemUsage(record){
+    const day=record.at.slice(0,10);
+    const dir=this.usageDir();
+    return this.local.run(dir,()=>this.lockAt(dir, async()=>{
+      const file=path.join(dir,`${day}.json`); const cur=await readJson(file,null);
+      const next={...addUsage(cur,record),schema:1,day}; await atomicJson(file,next); return next;
+    }));
+  }
+  async usageRecords(projectId,missionId,limit=100){
+    try{return (await fs.readFile(path.join(this.missionDir(projectId,missionId),'usage.jsonl'),'utf8')).split('\n').filter(Boolean).slice(-limit).map(JSON.parse);}
+    catch(e){if(e.code==='ENOENT')return[];throw e;}
   }
   /** Structured checkpoint from a harness. Creates the mission when absent. */
   async recordCheckpoint(projectId,missionId,fields={},{merge='append'}={}){
