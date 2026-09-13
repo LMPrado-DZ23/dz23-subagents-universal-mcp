@@ -1,3 +1,11 @@
+/** Invalid runtime configuration. Messages name variables, never their secret values. */
+export class ConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigError';
+  }
+}
+
 /** JSON-RPC protocol error: code, stable message and non-sensitive data. */
 export class RpcError extends Error {
   constructor(code, message, data) {
