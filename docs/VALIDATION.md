@@ -1,5 +1,102 @@
 # Validação
 
+## v2.3.0 — conformidade MCP, segurança HTTP, observabilidade, orçamento e memória v2
+
+Data: 2026-09-13. Ambiente executado: Windows 11, Node.js v24.16.0.
+Branch `feat/v2.3.0-operability`, base `37ef590` (v2.2.5 publicada no GitHub).
+
+### Baseline antes das mudanças (v2.2.5)
+
+| Comando | Resultado |
+| --- | --- |
+| `npm run check` | 20 arquivos JavaScript verificados |
+| `npm test` | 33 aprovados, 0 falhas |
+| `npm run check:release` | PASS, 61 arquivos |
+
+### Gates da candidata
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 61 arquivos JavaScript, lint com 0 problemas |
+| `npm test` | 123 aprovados, 0 falhas, 0 cancelados, 0 ignorados (16,1 s) |
+| `npm run check:release` | PASS, versão 2.3.0, 105 arquivos, nenhum padrão de segredo |
+| `npm run check:public` | PASS, 106 arquivos rastreados, 105 listados mais o próprio manifesto |
+| `git diff --check` | sem problemas |
+| `npm run test:coverage` | linhas 95,66 %, branches 84,76 %, funções 91,93 % (relatório, sem limite mínimo) |
+
+Cada fase foi commitada separadamente só depois de `npm run check` e `npm test` passarem.
+
+### Smoke em processo real
+
+**HTTP** (`node src/index.js --http`, loopback, token sintético de 44 caracteres, provider apontando
+para uma porta local fechada, estado em diretório temporário):
+
+| Verificação | Resultado |
+| --- | --- |
+| `/healthz` sem token / com token | 401 / 200 |
+| `initialize` com 2025-11-25 | 200, `protocolVersion` 2025-11-25, `serverInfo.version` 2.3.0 |
+| `tools/list` | 11 ferramentas, incluindo `verify_model` |
+| `delegate` com prompt vazio, header 2025-06-18 | JSON-RPC `-32602`, `field: prompt`, `reason: must not be empty` |
+| Mesmo pedido, header 2025-11-25 | `isError: true`, `code: invalid_arguments` |
+| `delegate` com provider inacessível | `all_providers_failed`, duas tentativas `provider_unavailable` (retry) |
+| Segundo `delegate` | `no_providers` (alvo em cooldown de 30 s) |
+| Terceiro `delegate` | HTTP 429, `Retry-After: 30`, JSON-RPC `-32001`, sem chamada ao provider |
+| `/metrics` com token | contadores de ferramentas, falhas, retries, rate limit, tokens e uso |
+| Logs em stderr | 10 linhas, todas JSON válido, token ausente |
+
+**Cliente MCP oficial** (`@modelcontextprotocol/sdk` 1.30.0, instalado com `--ignore-scripts` em
+diretório temporário descartável, fora do repositório e sem entrar nas dependências do projeto):
+
+| Transporte | Resultado |
+| --- | --- |
+| stdio (`StdioClientTransport`) | `connect` ok, `serverInfo` 2.3.0, 11 ferramentas, `project_init`, `memory_checkpoint` e `mission_status` ok, argumento inválido como `isError`/`invalid_arguments`, provider inacessível como `all_providers_failed`, ferramenta inexistente como `McpError -32602`, `ping` ok |
+| Streamable HTTP (`StreamableHTTPClientTransport`, token Bearer) | Protocolo negociado 2025-11-25 e os mesmos resultados; GET sem SSE tolerado pelo cliente; token ausente dos logs |
+
+**CLI em cópia da memória real 2.2.x** (cópia temporária de `~/.dz23-subagents`, 1,4 MB, removida
+depois; a memória original não foi lida por escrita nem alterada): `doctor` sem falhas;
+`missions list` leu 23 missões de 9 projetos (10 `done`, 13 `active`) com migração para o schema 2;
+`memory repair` (dry run) não encontrou problemas.
+
+### Defeitos encontrados durante a implementação e corrigidos pela causa raiz
+
+| Defeito | Reprodução | Correção e evidência |
+| --- | --- | --- |
+| No Windows, `rename` de `state.json` falhava com EPERM enquanto outra operação do mesmo processo lia o arquivo; um worker falhava depois de uma chamada bem-sucedida (o defeito já existia na 2.2.5, com menor frequência) | Swarm com orçamento concorrente: 2 de 5 execuções falharam; teste com leitores contínuos | Serialização de leituras/escritas do processo por projeto e retry de erros transitórios; 0 falhas em 30 execuções repetidas e regressões em `test/memory-io.test.js` |
+| Erro inesperado de worker devolvia a mensagem crua, incluindo caminho absoluto do estado | Mesma reprodução | Falhas inesperadas viram `internal_error` genérico; teste dedicado |
+| Uma lista longa de decisões podia consumir todo o orçamento de contexto e esconder invariantes | Teste de contexto com lista extensa | Alocação em duas passagens com teto por seção; teste verifica critérios e invariantes preservados |
+| `verify_model` aceitava `auto` como alvo explícito na validação | Teste de schema | Padrão com lookahead negativo; teste |
+| Peso de rate limit maior que a capacidade tornava a ferramenta impossível sem aviso | Teste do limitador | `config`/`doctor` reportam erro; teste |
+| Mensagem "check quota" de limite por minuto seria classificada como quota esgotada (sem retry) | Tabela de classificação | Padrão de quota restrito; teste de taxonomia |
+
+### Cobertura dos critérios de aceite por testes
+
+| Critério | Onde |
+| --- | --- |
+| Validação MCP (obrigatório, tipo, enum, limites, campo desconhecido, prompt vazio/grande, defaults) | `test/schema.test.js` |
+| Erros JSON-RPC, `id` 0/string/null, notificações, negociação de versão, paridade stdio/HTTP | `test/jsonrpc.test.js` |
+| Token por arquivo, escopos, bind inseguro, rate limit 429 sem chamada, limites HTTP, shutdown | `test/http-security.test.js` |
+| `request_id` em logs/journal/resultados, redação de segredos, métricas, stdio | `test/observability.test.js` |
+| Taxonomia de erros, retry, Retry-After, failover, sem failover para requisição inválida | `test/provider-errors.test.js` |
+| Orçamento disponível/excedido, uso do provider, sem uso, custo desconhecido, concorrência, retry, revisor | `test/budget.test.js` |
+| Estratégias, diversidade efetiva/observada, revisor distinto, consenso e síntese | `test/routing.test.js` |
+| `verify_model`, flags de inventário, capabilities `unknown` | `test/verify.test.js` |
+| Migração de schema, integridade, locks órfãos, journal, contexto estruturado, reparo | `test/memory-v2.test.js`, `test/memory-io.test.js` |
+| CLI, códigos de saída, confirmações | `test/cli.test.js` |
+| Lint e auditoria de arquivos públicos | `test/tooling.test.js` |
+
+### Limitações desta validação
+
+- O SDK MCP oficial foi executado manualmente nesta validação, mas não faz parte da CI (o projeto não
+  tem dependências); a CI verifica o contrato com fixtures JSON-RPC e processos reais stdio e HTTP.
+- Nenhum provider cloud ou real foi chamado. `health_check`, `verify_model` e delegação foram
+  exercitados com servidores locais falsos ou portas fechadas.
+- Docker e compose não foram executados.
+- GitHub Actions está configurado; aprovação só vale depois da execução remota.
+- O shutdown gracioso foi verificado no teste em processo. No Windows, `kill('SIGTERM')` encerra o
+  processo filho sem executar handlers, então não foi observado em processo separado.
+- Rate limit, orçamento e cooldown são por processo; concorrência entre processos não foi testada.
+  Locks em sistemas de arquivos de rede não foram testados.
+
 ## v2.2.5 — hardening e integração real
 
 Data: 2026-09-12. Ambiente executado: Windows, Node.js v24.16.0.
@@ -29,107 +126,10 @@ SHA-256 da base: `06a648b3e06f51dba87691323d1bb3b81a31206094652e2ac61c4fafb8c166
 O ZIP de origem não foi alterado. A correção foi feita em uma cópia isolada;
 nenhuma configuração, memória ou projeto da máquina do usuário foi acessado.
 
-## Incidente e reprodução
-
-O log fornecido pelo usuário mostra 24/25 testes aprovados em Windows, Node 24.16.0,
-e falha `expected real parallelism` em `test/router.test.js:59` da versão 2.2.3.
-O publicador parou na regressão, antes das chamadas GitHub/criação de Git previstas
-adiante no script. A falha não deve ser contornada desabilitando esse gate.
-
-Nesta execução, a base 2.2.3 passou 25/25 no Linux sem atraso artificial. A mesma
-assertion foi reproduzida como falha ao inserir, somente no ambiente de teste,
-100 ms de atraso serializado na gravação dos eventos `agent_attempt`.
-O teste original mantinha as chamadas falsas abertas por apenas 40 ms, de modo
-que o resultado dependia da rapidez de preparação dos outros workers. Essa é uma
-reprodução controlada; não é alegação de ter executado Windows neste ambiente.
-
-A revisão encontrou também um defeito independente no runtime: o vetor de slots
-repetia o primeiro alvo antes de incluir o segundo. Três papéis podiam ir para p1,
-p1, p1, embora o nome do teste afirmasse que seriam providers diferentes. Uma
-assertion adicional reproduziu esse erro antes da correção de `core.js`.
-
-## Correções e evidências
-
-- `swarm_run` distribui papéis em round-robin pelos alvos elegíveis antes de reutilizar
-  um alvo. O limiter existente continua aplicando limites globais e por provider:model.
-- Barreiras de Promises mantêm chamadas abertas até observar três chamadas em voo,
-  nenhuma finalizada e os três alvos esperados. Só depois as respostas são liberadas.
-- O reviewer só inicia após os workers; três saídas e a integração são persistidas.
-- Teste com apenas um provider comprova três chamadas ativas e duas submissões na
-  fila, antes de liberar as respostas; os cinco workers e o reviewer concluem.
-- A regressão de limites observa três slots globais, fila de onze chamadas,
-  limite por alvo e liberação de recursos mesmo quando uma operação falha.
-- Regressão adicional verifica round-robin/reutilização e exclusão de alvo em cooldown.
-- Watchdogs de 10 s detectam travamento/serialização. Nenhuma assertion de sucesso
-  exige resposta dentro de 30/40 ms; os testes têm timeout externo de 20 s.
-- Nenhuma trava de quota, custos, HTTP, memória ou publicação foi removida.
-
-## Repetição local
-
-| Execução | Resultado observado |
-| --- | --- |
-| `npm run check` | 20 arquivos JavaScript verificados |
-| `npm test` | 27 aprovados, 0 falhas, 0 ignorados |
-| Regressão completa normal | 20 execuções consecutivas, todas 27/27 |
-| Regressão com journal atrasado por fixture externa | 5 execuções, todas 27/27 |
-| Total dessas repetições | 675 resultados de teste aprovados |
-| Repetição da reprodução antiga após correção | PASS com o mesmo atraso de journal |
-
-Os logs das execuções foram observados durante esta entrega; não são benchmarks
-nem prova de compatibilidade de todos os providers/harnesses. As APIs nos testes
-são fixtures; o teste HTTP usa servidor em loopback. Nenhuma API cloud foi chamada.
-
-## Testes da força das assertions (mutações descartáveis)
-
-Cada alteração abaixo foi aplicada somente a uma cópia temporária, nunca ao ZIP:
-
-| Mutação | Resultado esperado e observado |
-| --- | --- |
-| Forçar limite global de uma chamada | O teste falha: workers não se sobrepõem |
-| Desabilitar limite por alvo | O teste falha: excede os três slots esperados |
-| Enviar todos os workers ao primeiro alvo | O teste falha: alvos não são distintos |
-
-As três mutações foram detectadas. Isso verifica que a troca de temporização por
-barreiras não fez os testes aceitarem execução serial nem limites desabilitados.
-
-## Distribuição e publicação
-
-O ZIP contém uma única pasta, sem `.env` privado, chaves, memória, `.git`, arquivos
-antigos ou bundles duplicados. `PUBLIC_FILES.json` é regenerado com os hashes da
-versão corrigida. `npm run check:release` verifica integridade, allowlist e padrões
-heurísticos de secrets. O scanner não é uma garantia exaustiva de ausência de dados.
-
-`PUBLICAR_WINDOWS.cmd` usa a pasta do próprio arquivo para chamar o publicador
-existente com `--public`. Não requer digitar caminho e preserva o exit code. Ele
-não substitui o gate de testes e não declara publicação antes da verificação remota.
-
-O dry-run reexecuta sintaxe e regressão, sem GitHub/commits. A extração final deve
-ser validada novamente com os mesmos comandos antes da entrega.
-
-## Limitações desta validação
-
-- Execução nativa Windows/Node 24 e do launcher `.cmd`: não realizada aqui.
-- GitHub Actions Linux/Windows Node 22/24: configurado, não executado nesta sessão.
-- Publicação remota: não realizada nesta sessão; o login local do usuário não
-  autentica o terminal do assistente.
-- Autenticação, saldo/quota e disponibilidade de contas de IA: não testados.
-- Não foram instalados hosts Claude/Codex/Hermes nem alterado o artefato de aceitação.
-
-`PUBLICACAO_REAL_NESTA_SESSAO=NAO_EXECUTADA`
-`VALIDACAO_WINDOWS_NODE24=BLOCKED_BY_EXTERNAL_DEPENDENCY`
-
-Fonte primária sobre temporizadores (contexto da correção, não substitui os testes):
-https://nodejs.org/download/release/v24.1.0/docs/api/timers.html#settimeoutcallback-delay-args
-
-## Reteste do pacote extraído nesta entrega
-
-O ZIP foi extraído novamente em uma pasta nova cujo caminho contém espaços.
-Nessa extração, `check:release` passou, e o publicador em `--dry-run` reexecutou
-sintaxe e os 27 testes: 27 aprovados, zero falhas, zero ignorados. O dry-run terminou
-com PASS para 62 arquivos públicos e não criou `.git` nem fez chamadas ao GitHub.
-
-Também foi iniciado um processo Node real com `src/index.js --stdio`, a partir de
-outra pasta: `initialize` retornou versão 2.2.4, `tools/list` retornou dez ferramentas
-e o processo encerrou com código zero. Isso é um smoke local do transporte, não
-instalação em um harness externo. O ZIP final foi regenerado após este registro e
-os mesmos gates foram reexecutados no conteúdo extraído novamente.
+O log fornecido pelo usuário mostrou 24/25 testes aprovados em Windows, Node 24.16.0,
+e falha `expected real parallelism` em `test/router.test.js` da versão 2.2.3. A falha foi
+reproduzida com atraso serializado no journal e corrigida com barreiras de Promises que
+observam chamadas simultâneas, sem depender de janelas de 30/40 ms. Mutações descartáveis
+(limite global de uma chamada, limite por alvo desabilitado, todos os workers no primeiro
+alvo) foram detectadas pelos testes. O pacote extraído foi retestado em pasta com espaços,
+com 27 testes aprovados, dry-run do publicador e smoke stdio real.
