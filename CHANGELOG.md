@@ -130,7 +130,8 @@ numa candidata interna, nunca publicada.
   primeira requisição são fechadas e respostas não autenticadas encerram a conexão; o endereço privado
   é analisado como IP de verdade (nomes como `10.0.0.1.evil.com` não contam); a checagem de maiúsculas
   só lista o diretório para IDs ainda não vistos; o guard de publicação cobre `apikey*`, `.pgpass`,
-  `.htpasswd`, `kubeconfig` e keystores Java.
+  `.htpasswd`, `kubeconfig` e keystores Java; `doctor` falha no check `http` quando `--http` recusaria o
+  token; `memory repair --json` separa `apply_requested` de `applied`.
 - Terceira rodada: missão que já atingiu `DZ23_MAX_STATE_BYTES` é recusada antes de qualquer chamada
   paga; conexões HTTP silenciosas são fechadas após o timeout de headers; erro de provider, rotação com
   provider desconhecido e HTTP inseguro fazem o servidor sair com 78 em vez de iniciar ou mostrar stack

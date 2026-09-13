@@ -161,7 +161,12 @@ Inteiros fora da faixa são ajustados ao limite com aviso; valores não numéric
 de `true`/`false` são erro. Esta tabela cobre as variáveis sem outra documentação. Orçamento, rate
 limit e limites de memória estão nas seções acima; estado, HTTP, autenticação e escopos em
 `docs/INSTALL_ANY_HARNESS.md` e `docs/SECURITY_AND_SECRETS.md`; limites de ferramentas e fila em
-`docs/TOOLS.md`. Todas aparecem com valor de exemplo em `.env.example`.
+`docs/TOOLS.md`; retries (`DZ23_MAX_RETRIES`, `DZ23_RETRY_BASE_DELAY_MS`, `DZ23_RETRY_AFTER_CAP_MS`) em
+`docs/PROVIDER_ARCHITECTURE.md`; `DZ23_MEMORY_FSYNC` em `docs/ARCHITECTURE.md`. Todas aparecem com valor
+de exemplo em `.env.example`.
+
+`memory repair --json` informa `apply_requested` (se `--apply` foi usado) e `applied` (se algum reparo
+foi de fato feito).
 
 | Variável | Padrão | Faixa | Efeito |
 | --- | --- | --- | --- |

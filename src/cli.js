@@ -102,7 +102,7 @@ async function doctor(opts, io) {
   const targets = unknown.length ? [] : router.targets();
   add('providers', targets.length ? 'pass' : 'fail',`${targets.length} eligible routing target(s), ${router.inventory().filter(p => p.enabled).length} enabled provider(s); no network calls made`);
   if (cfg.allowHttp) {
-    const problem = httpSecurityProblem(cfg);
+    const problem = httpSecurityProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'DZ23_MCP_TOKEN has fewer than 32 characters; --http refuses to start' : null);
     add('http', problem ? 'fail' : 'pass', problem || `enabled on ${cfg.host}:${cfg.port}, auth ${cfg.authMode}, token source ${cfg.tokenSource}`);
   } else {
     add('http', 'pass', 'disabled (stdio only)');
@@ -225,10 +225,11 @@ async function memoryCommand(positionals, opts, io) {
   if (opts.project) await exactIds(memory, validId(opts.project, 'project_id'));
   const report = await inspectMemory(memory, {projectId: opts.project || undefined});
   const result = await repairMemory(memory, report, {apply: Boolean(opts.apply)});
-  const output = {state_dir_exists: report.state_dir_exists, projects_scanned: report.projects_scanned, missions_scanned: report.missions_scanned, applied: result.applied, issues: report.issues, actions: result.actions};
+  const output = {state_dir_exists: report.state_dir_exists, projects_scanned: report.projects_scanned, missions_scanned: report.missions_scanned,
+    apply_requested: result.applied, applied: result.actions.some(action => ['removed', 'restored', 'closed'].includes(action.status)), issues: report.issues, actions: result.actions};
   print(io, output, opts.json, r => [`Scanned ${r.projects_scanned} project(s), ${r.missions_scanned} mission(s); ${r.issues.length} issue(s).`,
     ...r.issues.map(i => `  ${i.repairable ? 'REPAIRABLE' : 'MANUAL    '}  ${i.type}  ${i.file || i.lock || `${i.project || ''}${i.mission ? `/${i.mission}` : ''}`}${i.action ? `  (${i.action})` : ''}`),
-    ...r.actions.map(a => `  ACTION  ${a.type}: ${a.status}`), r.applied ? (r.actions.some(a => ['removed', 'restored', 'closed'].includes(a.status)) ? 'Repairs applied.' : 'No repairs applied.') : 'Dry run only. Re-run with --apply --yes to repair.'].join('\n'));
+    ...r.actions.map(a => `  ACTION  ${a.type}: ${a.status}`), r.apply_requested ? (r.applied ? 'Repairs applied.' : 'No repairs applied.') : 'Dry run only. Re-run with --apply --yes to repair.'].join('\n'));
   const blocking = report.issues.some(issue => !issue.repairable && ['corrupt_project', 'corrupt_mission_state'].includes(issue.type));
   if (!result.applied) return blocking || report.issues.some(issue => issue.repairable) ? EXIT.PROBLEMS : EXIT.OK;
   return blocking || result.actions.some(action => action.status === 'skipped') ? EXIT.PROBLEMS : EXIT.OK;

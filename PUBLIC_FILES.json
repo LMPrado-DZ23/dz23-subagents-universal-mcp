@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "1a3be2bebf6ec5234e3e87f0687c0a0245ca7e68583c6aaefe797c311d923fdd"
+      "sha256": "532b716557c445eb3c204ab08823cd244aca8611bd88c2dd8662505e5447d99b"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -140,7 +140,7 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "129a627d96e79612dfa3c0c83b5ab41e3c1805e4a6b82e09b55333f9b220e3df"
+      "sha256": "86a311c945c8a4b0d7553975c742dc9086b64e2dededabadf8179571697b1a53"
     },
     {
       "path": "docs/PROVIDER_ARCHITECTURE.md",
@@ -216,7 +216,7 @@
     },
     {
       "path": "src/cli.js",
-      "sha256": "eb05ff83812c43c2a6b6ec7148fb83419691889ca4b09f5729ee7a2d0453665b"
+      "sha256": "94398d7759d9cd53e299b1e9ebda2fd67c81df919ae897766412a54d33c659a1"
     },
     {
       "path": "src/concurrency.js",
@@ -373,6 +373,10 @@
     {
       "path": "test/audit-round4.test.js",
       "sha256": "9b970572f2ba12bf4a6721296d2b99bd2653ae1b5f5e43f8078d890d459ff8b0"
+    },
+    {
+      "path": "test/audit-round5.test.js",
+      "sha256": "4be2c63f094d8c12d19f2c1d56b25049a40361dc0efb0a0045b4e9f290a65e3d"
     },
     {
       "path": "test/budget.test.js",
