@@ -58,7 +58,8 @@ test('a lock owned by an earlier process with the same PID (restarted container)
   const lockPath = path.join(await tempDir(t), '.lock');
   fs.mkdirSync(lockPath);
   const at = new Date(Date.now() - 120_000).toISOString();
-  const owner = {pid: process.pid, hostname: os.hostname(), created_at: at, updated_at: at, lock_version: 1, process_started_at: '1999-01-01T00:00:00.000Z'};
+  // created_at after boot (CI runners may have booted minutes ago); staleness comes from updated_at.
+  const owner = {pid: process.pid, hostname: os.hostname(), created_at: new Date(Date.now() - 1000).toISOString(), updated_at: at, lock_version: 1, process_started_at: '1999-01-01T00:00:00.000Z'};
   fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify(owner));
   const inspection = await inspectLock(lockPath);
   assert.deepEqual([inspection.removable, inspection.reason], [true, 'owner_pid_reused']);

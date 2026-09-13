@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {ProjectMemory} from '../src/memory.js';
 import {runCli} from '../src/cli.js';
+import {inspectLock} from '../src/locks.js';
 
 // CLI regressions for the fifth audit round (product re-verification of round 4).
 
@@ -45,4 +46,20 @@ test('memory repair --json separates apply_requested from applied', async t => {
   await runCli(['memory', 'repair', '--apply', '--yes', '--json'], apply.io);
   const applyReport = JSON.parse(apply.out.stdout);
   assert.deepEqual([applyReport.apply_requested, applyReport.applied], [true, false], 'a manual-only issue is not reported as repaired');
+});
+
+test('on a freshly booted host a live owner created after boot is still trusted', async t => {
+  const lockPath = path.join(await tempDir(t), '.lock');
+  fs.mkdirSync(lockPath);
+  const now = Date.now();
+  fs.writeFileSync(path.join(lockPath, 'owner.json'), JSON.stringify({pid: process.pid, hostname: os.hostname(), lock_version: 2,
+    created_at: new Date(now - 1000).toISOString(), updated_at: new Date(now - 120_000).toISOString()}));
+  const originalUptime = os.uptime;
+  os.uptime = () => 30; // GitHub runners may have booted seconds before the tests start
+  try {
+    const inspection = await inspectLock(lockPath);
+    assert.deepEqual([inspection.removable, inspection.reason], [false, 'owner_process_running']);
+  } finally {
+    os.uptime = originalUptime;
+  }
 });

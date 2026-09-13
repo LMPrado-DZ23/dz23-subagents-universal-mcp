@@ -356,7 +356,7 @@
     },
     {
       "path": "test/audit-round2.test.js",
-      "sha256": "9bb34128a3d70dc43aa3082fde9a961c5f9e61c64f5b9dbf0ad60d53fd16df09"
+      "sha256": "1e7ce2ddac00f14934afcbf51358982cd8126eb209ad9c83dace3b4f7a0e85f0"
     },
     {
       "path": "test/audit-round3.test.js",
@@ -376,7 +376,7 @@
     },
     {
       "path": "test/audit-round5.test.js",
-      "sha256": "4be2c63f094d8c12d19f2c1d56b25049a40361dc0efb0a0045b4e9f290a65e3d"
+      "sha256": "438c0603f392ffc4d878169d2884df4c0a0bb7625766f431d026d7b177cee193"
     },
     {
       "path": "test/budget.test.js",
@@ -408,7 +408,7 @@
     },
     {
       "path": "test/memory-v2.test.js",
-      "sha256": "fcd085923b2eb0bd3759ab60aa8eade76c6452ebc7394d3726fa08a60946b9fa"
+      "sha256": "404cc0e572382b08b7d2c92bd5833e70b19f218834ed643ef9d4c5e1975f8fea"
     },
     {
       "path": "test/observability.test.js",

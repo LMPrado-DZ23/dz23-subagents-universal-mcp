@@ -82,7 +82,9 @@ function plantLock(dir, owner, ageMs = 0) {
   const lock = path.join(dir, '.lock');
   fs.mkdirSync(lock, {recursive: true});
   const at = new Date(Date.now() - ageMs).toISOString();
-  if (owner) fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({lock_version: 2, created_at: at, updated_at: at, ...owner}));
+  // created_at stays after this host's boot (CI runners may have booted minutes ago); staleness comes from updated_at.
+  const createdAt = new Date(Date.now() - Math.min(ageMs, 1000)).toISOString();
+  if (owner) fs.writeFileSync(path.join(lock, 'owner.json'), JSON.stringify({lock_version: 2, created_at: createdAt, updated_at: at, ...owner}));
   else fs.utimesSync(lock, new Date(Date.now() - ageMs), new Date(Date.now() - ageMs));
   return lock;
 }
