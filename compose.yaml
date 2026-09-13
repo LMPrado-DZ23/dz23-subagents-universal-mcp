@@ -7,15 +7,29 @@ services:
       DZ23_STATE_DIR: /state
       DZ23_HTTP_HOST: 0.0.0.0
       DZ23_HTTP_PORT: 8787
+      DZ23_ALLOW_HTTP: "true"
+      # Prefer a mounted secret file. Set only one of DZ23_MCP_TOKEN (.env) or DZ23_MCP_TOKEN_FILE.
+      # DZ23_MCP_TOKEN_FILE: /run/secrets/dz23_mcp_token
+    # secrets:
+    #   - dz23_mcp_token
     volumes:
       - dz23_subagents_state:/state
     ports:
+      # Loopback only. Put TLS and network policy in front before exposing it further.
       - "127.0.0.1:8787:8787"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    tmpfs:
-      - /tmp:size=64m,mode=1777
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 20s
+# secrets:
+#   dz23_mcp_token:
+#     file: ./secrets/dz23_mcp_token
 volumes:
   dz23_subagents_state:

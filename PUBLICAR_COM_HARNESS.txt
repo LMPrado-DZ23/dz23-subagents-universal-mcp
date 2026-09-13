@@ -23,6 +23,7 @@ Depois rode:
   node scripts/publish-github.mjs --public
 
 O script é somente para primeira publicação; rejeita .git existente ou nome já usado.
+Para atualizar um repositório já publicado, siga docs/PUBLISH_GITHUB.md (Atualizações).
 Não mude visibilidade nem faça force-push para contornar esse bloqueio. Se uma
 publicação parcial criou um repositório remoto, siga a recuperação documentada sem
 deletar nada automaticamente.

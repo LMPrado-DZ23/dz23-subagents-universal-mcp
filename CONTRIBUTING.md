@@ -6,9 +6,9 @@ os avisos de origem; qualquer código de terceiros precisa de licença e atribui
 
 1. Crie branch/fork, configure Node.js 22+ e leia README/SECURITY/ARCHITECTURE.
 2. Escreva teste de regressão para a causa real; não remova verificações para obter PASS.
-3. Execute `npm run check` e `npm test` sem credenciais reais.
+3. Execute `npm run check` (sintaxe e lint) e `npm test` sem credenciais reais.
 4. Atualize documentação/CHANGELOG; revise os arquivos e regenere PUBLIC_FILES.json
-   com `node scripts/update-manifest.mjs`; rode `npm run check:release`.
+   com `node scripts/update-manifest.mjs`; rode `npm run check:release` e `npm run check:public`.
 5. Abra PR indicando problema, solução, limites, testes executados e bloqueios externos.
 
 Não acrescente adapters redundantes quando OpenAI-compatible funcionar. Não marque

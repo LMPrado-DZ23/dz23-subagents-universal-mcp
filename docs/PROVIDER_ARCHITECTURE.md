@@ -1,6 +1,6 @@
 # Registro de providers e configuração
 
-Este inventário foi gerado do código v2.2.5, sem chamadas de rede e sem valores de
+Este inventário foi gerado do código v2.3.0, sem chamadas de rede e sem valores de
 credencial. Endpoints/modelos sugeridos são configuração, não prova de serviço
 atual, gratuidade, autenticação ou entitlement. Descubra/valide modelos na sua conta.
 Um campo de modelo vazio exige MODEL configurado ou alvo provider:model explícito.
@@ -42,18 +42,46 @@ local usa `custom` com endpoint local. LM Studio e vLLM também exigem servidor 
 `KEY_FILE` lê um arquivo de segredo; arquivo ilegível falha explicitamente. Together
 aceita o alias TogetherAIAPI_KEY; Hugging Face aceita HF_TOKEN.
 
-`provider_inventory` relata CONFIGURED e campos faltantes, não READY autenticado.
-`list_models` mostra alvos de roteamento; `discover_models` consulta catálogo com
-cache de cinco minutos; `health_check` faz inferência textual real e pode consumir
-créditos. Catálogo não comprova acesso a cada modelo; formatos/paginação variam por
-serviço e não existe garantia de catálogo exaustivo.
+## Estados de um provider
 
-O adapter expõe texto não-streaming. Coding/reasoning dependem do modelo e não são
-benchmarkados. Vision, tools, embeddings, áudio e streaming não estão expostos,
-mesmo que o fornecedor os suporte em outras APIs. ElevenLabs e Deepgram não são
-LLM adapters desta versão. O registro genérico evita duplicação de adapters.
+`provider_inventory.status_flags` separa quatro fatos que antes se confundiam:
 
-A classificação de custos é estática: mixed/free-tier não certifica uso gratuito.
-A chave ausente desabilita cloud; alvos explicitamente configurados ainda precisam
-estar na rotação quando DZ23_ROTATION tiver uma lista. Para inferência paga/low-cost,
-ALLOW_PAID deve ser habilitado pelo operador e o fornecedor deve impor limites.
+| Flag | Significa | Não significa |
+| --- | --- | --- |
+| `configured` | Endpoint e modelo definidos | credencial válida |
+| `credential_present` | Valor de credencial encontrado (`credential_required` indica se é necessária) | autorização no fornecedor |
+| `catalog_discovered` | Última consulta a `/models` teve sucesso | acesso à inferência |
+| `inference_verified` | Última `verify_model` gerou texto | disponibilidade futura ou quota restante |
+
+`discover_models` persiste o resultado do catálogo; `verify_model` persiste
+`last_verified_at`, `last_success_at`, latência e o último tipo de erro. Nenhuma verificação
+cobrável roda na inicialização.
+
+## Erros, retry e cooldown
+
+Falhas são classificadas em `rate_limited`, `quota_exhausted`, `billing_required`,
+`authentication_failed`, `permission_denied`, `model_not_found`, `endpoint_not_found`,
+`provider_timeout`, `provider_unavailable`, `invalid_request`, `response_invalid`,
+`provider_error` e `configuration_error`, a partir do status HTTP e de padrões no corpo
+(que nunca é devolvido ou gravado).
+
+- Retry no mesmo alvo apenas para `rate_limited`, `provider_timeout` e `provider_unavailable`
+  (`DZ23_MAX_RETRIES`, padrão 1; backoff exponencial a partir de `DZ23_RETRY_BASE_DELAY_MS`;
+  `Retry-After` respeitado até `DZ23_RETRY_AFTER_CAP_MS`, acima disso vai direto ao failover).
+- `invalid_request` (400/413/422 sem sinal de modelo) não é repetido nem enviado a outros providers.
+- Cooldown: 60 s para `rate_limited`, `response_invalid` e `provider_error`; 30 s para timeout e
+  indisponibilidade; 15 min para quota, cobrança, autenticação, permissão, modelo, endpoint e
+  configuração; nenhum para `invalid_request`. Um `Retry-After` maior prolonga o cooldown.
+
+## Capabilities
+
+O adapter expõe texto não-streaming. `capabilities` descreve essa superfície: vision, tools,
+embeddings e streaming são `false` porque não são expostos, mesmo que o fornecedor os ofereça.
+`catalog_capabilities` reproduz o que o catálogo declara (modalidades, parâmetros suportados,
+contexto e limite de saída) e usa `unknown` quando o catálogo não informa. Coding/reasoning não são
+benchmarkados. ElevenLabs e Deepgram não são adapters desta versão.
+
+A classificação de custo é estática: mixed/free-tier não certifica uso gratuito. A chave ausente
+desabilita cloud; alvos explícitos precisam estar na rotação quando DZ23_ROTATION tiver lista.
+Para inferência paga/low-cost, `DZ23_ALLOW_PAID` deve ser habilitado pelo operador, e o orçamento
+e os limites do fornecedor devem ser configurados.

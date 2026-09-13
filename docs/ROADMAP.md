@@ -1,18 +1,22 @@
 # Roadmap — metas, não funcionalidades entregues
 
-Prioridade 1: testes de conformidade MCP com SDKs/clientes reais, validação de schemas,
-auth por cliente e isolamento antes de qualquer serviço público multiusuário.
+Entregue na 2.3.0 e fora deste roadmap: validação de schemas, erros JSON-RPC, negociação de
+versão, token por arquivo e escopos, rate limit por processo, logs/métricas, taxonomia de erros,
+orçamento, diversidade de roteamento, `verify_model`, memória versionada e CLI operacional.
 
-Prioridade 2: memória transacional com recuperação de crashes, retenção, pesquisa
-seletiva e contexto estruturado que preserve invariantes sob limites de tokens.
+Prioridade 1: contrato com SDKs/clientes MCP oficiais em CI, Streamable HTTP com SSE e sessões,
+OAuth para uso remoto e limites/orçamento compartilhados entre processos.
 
-Prioridade 3: autorização de ferramentas e execução em sandbox/worktrees, task DAG,
-integração verificável de patches/testes, idempotência e checkpoints de ações reais.
+Prioridade 2: memória transacional (por exemplo SQLite com WAL e migrações), isolamento de projetos
+por identidade, retenção configurável e busca seletiva no contexto.
 
-Prioridade 4: discovery/entitlement por provedor, orçamento com bloqueio verificável,
-capabilities por modelo e benchmarks de qualidade/custo/latência.
+Prioridade 3: autorização de execução em sandbox/worktrees, task DAG, integração verificável de
+patches/testes, idempotência e checkpoints de ações reais.
 
-Prioridade 5: multimodalidade (vision, speech, embeddings), streaming e OAuth remoto,
-com controles/testes específicos. Credencial de um serviço não equivale a adapter.
+Prioridade 4: preços mantidos por fonte verificável, benchmarks de qualidade/custo/latência e
+capabilities por modelo validadas por testes, não apenas por catálogo.
+
+Prioridade 5: multimodalidade (vision, speech, embeddings) e streaming de saída, com controles e
+testes específicos. Credencial de um serviço não equivale a adapter.
 
 Não apresentar estes itens como existentes em releases, README ou inventário.

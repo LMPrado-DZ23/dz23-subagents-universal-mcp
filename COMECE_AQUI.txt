@@ -1,4 +1,4 @@
-DZ23 SUBAGENTS UNIVERSAL MCP 2.2.5 — PACOTE OPEN-SOURCE
+DZ23 SUBAGENTS UNIVERSAL MCP 2.3.0 — PACOTE OPEN-SOURCE
 
 Uma única pasta. Sem ZIP antigo, sem bundle duplicado e sem chaves reais.
 
@@ -8,7 +8,8 @@ PARA INSTALAR
    Windows PowerShell: ./scripts/install-windows.ps1
 3. O instalador cria .env a partir de .env.example apenas se ele ainda não existe.
 4. Configure o endpoint/modelo que realmente está disponível. Não publique o .env.
-5. Revise config/generated e acrescente somente a entrada MCP ao seu harness.
+5. Rode: node src/index.js doctor  (diagnóstico local, sem chamadas a providers).
+6. Revise config/generated e acrescente somente a entrada MCP ao seu harness.
    Alternativa: entregue HERMES_SELF_INSTALL_PROMPT.txt ao agente no computador alvo.
 
 PARA PUBLICAR
@@ -21,5 +22,6 @@ terminal e GitHub autenticado. O pacote ainda NÃO comprova publicação no GitH
 Primeiro teste: node scripts/publish-github.mjs --public --dry-run
 
 ATUALIZAÇÃO
-Preserve o .env e a pasta DZ23_STATE_DIR fora do repositório público. Não há migração
-ou exclusão automática. Verifique os IDs e as configurações conforme CHANGELOG.md.
+Preserve o .env e a pasta DZ23_STATE_DIR fora do repositório público e faça backup antes.
+A memória 2.2.x é migrada na leitura para o schema 2; nada é apagado automaticamente.
+Leia as mudanças incompatíveis em CHANGELOG.md e o roteiro em docs/OPERATIONS.md.

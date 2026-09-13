@@ -6,6 +6,7 @@ a11y, artefatos sob aceitação ou entradas MCP existentes. Faça backup das con
 que precisar editar. Não suponha ter permissões de shell se o host não as oferecer.
 
 Verifique Node.js 22+, rode npm run check, npm test e npm run check:release.
+Depois rode node src/index.js doctor e node src/index.js config validate (sem chamadas a providers).
 Crie .env a partir de .env.example somente se ausente. Preserve o estado existente.
 Use variáveis de ambiente/arquivos de segredo no runtime; não cole valores no chat.
 Não use provider cloud/pago sem autorização e sem limites de custo definidos na conta.

@@ -1,5 +1,77 @@
 # Changelog
 
+## 2.3.0 — 2026-09-13 — MCP conformance, HTTP security, observability, budgets and memory v2
+
+### Mudanças incompatíveis (revise antes de atualizar)
+
+- `consensus` retorna um objeto (`requested`, `planned`, `received`, `failed`,
+  `responses`, `routing`, `synthesis`) em vez de uma lista.
+- Argumentos de ferramentas são validados pelo schema publicado: campos desconhecidos,
+  tipos errados, enums inválidos, prompts vazios ou acima do limite são recusados.
+  `memory_checkpoint.status` agora é um enum.
+- `structuredContent` é sempre um objeto; resultados em lista vêm como `{items: [...]}`.
+  O texto em `content` mantém o JSON original.
+- Tipos de erro de provider mudaram para a taxonomia de 13 categorias
+  (`quota_or_rate_limit`, `auth_or_entitlement` e `model_or_endpoint_missing` não existem mais).
+- `initialize` aceita 2025-11-25 e 2025-06-18; versões datadas não suportadas recebem
+  contraproposta; valores malformados recebem `-32602`.
+- `memory_checkpoint` não força mais `status: active` quando omitido e cria a missão
+  quando ela ainda não existe.
+- Endpoints REST (`/api/*`) usam a mesma validação/escopos/rate limit das ferramentas MCP;
+  o formato de erro mudou.
+- Cooldown depende do tipo de erro (antes: 15 minutos para qualquer falha).
+- `discover_models` devolve `{id, owned_by, catalog_capabilities}` por modelo
+  (campos crus do catálogo foram removidos).
+- Definir `DZ23_MCP_TOKEN` e `DZ23_MCP_TOKEN_FILE` ao mesmo tempo impede a inicialização.
+
+### MCP e JSON-RPC
+- Validador de JSON Schema sem dependências; keywords não suportadas são recusadas no registro.
+- Códigos `-32700`, `-32600`, `-32601`, `-32602`, `-32603`; `-32001` rate limit, `-32002` forbidden,
+  `-32003` servidor ocupado. Falhas esperadas de ferramenta viram `isError: true` com
+  `code`, `message`, `request_id` e detalhes sanitizados.
+- `id: 0` e ids string preservados; `id: null` e batch recusados; notificações sem resposta.
+- Header `MCP-Protocol-Version` validado quando presente.
+
+### HTTP e identidade
+- `DZ23_MCP_TOKEN_FILE`; modo `scoped` com digests SHA-256 e escopos por token.
+- Rate limiting por processo (identidade, ferramenta, concorrência e custo), 429 + `Retry-After`
+  antes de qualquer chamada a provider; falhas de autenticação por endereço limitadas.
+- Limites de corpo, tempo de leitura, requisições em andamento, conexões e shutdown gracioso.
+
+### Observabilidade
+- Logs JSON Lines em stderr com redação; `request_id` em logs, journal, resultados e erros.
+- Métricas de processo e `GET /metrics` (escopo `admin:inventory`).
+
+### Providers, retry e roteamento
+- `ProviderError` com `kind`, `retryable`, `retryAfterMs` e mensagens sem corpo cru.
+- Retry limitado apenas para `rate_limited`, `provider_timeout` e `provider_unavailable`;
+  `invalid_request` não faz failover.
+- Estratégias `first`, `round_robin`, `provider_diversity`, `model_diversity`,
+  `cost_optimized`, `latency_optimized`, diversidade observada, `strict_diversity`
+  e `avoid_reviewer_target`.
+- `verify_model` (exige `confirm_billable: true`), status de catálogo/verificação persistido,
+  `catalog_capabilities` com `unknown` quando o catálogo não declara.
+
+### Orçamento
+- Limites de tokens de entrada, chamadas/tokens por missão e custo por chamada, missão,
+  projeto e dia; política `allow_unknown_cost`/`deny_unknown_cost`; preços apenas de tabela explícita.
+- Registro de uso com origem de tokens e custo; reservas em processo contra estouro concorrente.
+
+### Memória
+- Schema versionado com migrações na leitura; JSON corrompido gera `memory_integrity`.
+- Locks com dono (pid, hostname, heartbeat) e remoção automática só de dono comprovadamente morto.
+- Journal com `seq` monotônico e recuperação de linha incompleta; escrita com fsync.
+- Contexto em camadas com relatório de seções truncadas.
+- Correção de condição de corrida no Windows: rename de `state.json` falhava com EPERM durante
+  leituras concorrentes; leituras/escritas do processo são serializadas por projeto e há retry.
+
+### CLI, CI e empacotamento
+- `doctor`, `config validate`, `providers`, `health --yes`, `missions list|show`,
+  `memory repair [--apply --yes]`, `token hash`, com `--json` e códigos de saída.
+- CI com lint, testes de contrato, cobertura (relatório) e auditoria dos arquivos públicos.
+- Docker com código somente leitura para o usuário não-root, volume de estado, healthcheck
+  com token por arquivo e compose com `read_only`, limites e secret opcional.
+
 ## 2.2.5 — 2026-09-12 — hardening de orquestração e limites
 
 - Contexto persistido e saídas de modelos são enviados como dados não confiáveis;

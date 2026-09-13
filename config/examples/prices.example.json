@@ -1,0 +1,7 @@
+{
+  "prices": {
+    "custom:*": {"input_per_million_usd": 0, "output_per_million_usd": 0},
+    "lmstudio:*": {"input_per_million_usd": 0, "output_per_million_usd": 0},
+    "vllm:*": {"input_per_million_usd": 0, "output_per_million_usd": 0}
+  }
+}

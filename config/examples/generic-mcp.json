@@ -2,5 +2,5 @@
   "name": "dz23-subagents",
   "transport": "stdio",
   "command": "node",
-  "args": ["/ABSOLUTE/PATH/DZ23-Subagents-v2.2.5/src/index.js", "--stdio"]
+  "args": ["/ABSOLUTE/PATH/dz23-subagents-universal-mcp/src/index.js", "--stdio"]
 }

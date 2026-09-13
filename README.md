@@ -4,9 +4,9 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v2.2.5 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
+**v2.3.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
 
-[English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
+[English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
 ## Para que serve
 
@@ -15,79 +15,76 @@ esse registro e continuar o trabalho. Para isso, ambos precisam usar **a mesma
 instância de memória**, `project_id` e `mission_id`. A memória não vem automaticamente
 da conversa privada do harness: ele deve enviar os fatos, decisões e checkpoints.
 
-Se uma chamada ao provider falhar, o roteador registra o erro e tenta o próximo
-alvo elegível, incluindo o estado persistido da missão. Não há recuperação dos
-pensamentos internos, tokens não recebidos ou efeitos externos que nunca foram registrados.
+Se uma chamada ao provider falhar, o roteador classifica o erro, repete apenas falhas
+temporárias e tenta o próximo alvo elegível com o estado persistido da missão. Não há
+recuperação de pensamentos internos, tokens não recebidos ou efeitos externos não registrados.
 
-Os subagentes desta versão são **chamadas independentes de modelo com papéis
-especializados**, não processos com terminal, navegador ou acesso automático ao
-repositório. Eles produzem texto/código; o harness aplica patches, executa testes e
-revisa os resultados sob as próprias permissões. O projeto não contorna limites,
-salvaguardas ou políticas de fornecedores.
+Os subagentes são **chamadas independentes de modelo com papéis especializados**, não
+processos com terminal, navegador ou acesso ao repositório. Eles produzem texto/código;
+o harness aplica patches, executa testes e revisa os resultados sob as próprias permissões.
 
 ## O fluxo
 
 ```text
 Claude / Codex / Hermes / cliente MCP
                  |
-        stdio (local) ou HTTP
+     stdio (local) ou HTTP autenticado
                  |
-     DZ23 Router + limite de chamadas
-          |                  |
-   memória por missão    pool de modelos
-   estado / journal      architect / frontend / backend
-   checkpoints           security / QA / devops / reviewer
-          |                  |
-          +---- resposta e handoff ----+
+  validação de schema · escopos · rate limit · request_id
+                 |
+     roteador · orçamento · retry/failover · diversidade
+          |                          |
+   memória versionada           pool de modelos
+   estado / journal / uso       architect / backend / frontend
+   checkpoints / contexto       security / QA / devops / reviewer
+          |                          |
+          +------ resposta e handoff ------+
                        |
            o harness aplica e verifica
 ```
 
 ## O que existe hoje
 
-| Recurso | Escopo implementado |
+| Área | Implementado nesta versão |
 | --- | --- |
-| Delegação e failover | OpenAI-compatible e Anthropic Messages nativa; saída textual |
-| Memória | JSON, journal e checkpoints no filesystem; locks e retenção limitada por projeto |
-| Paralelismo | Limites de chamadas globais, por provider:model e de fila, por processo |
-| Papéis | Architect, Backend, Frontend, Security, QA, DevOps, Reviewer e Worker; enum estrito |
-| Inventário | Configuração e origem da credencial, sem devolver o valor da chave |
-| Model discovery | Consulta ao catálogo exposto pelo adapter; não prova acesso a inferência |
-| Saúde | Uma pequena geração real, quando o operador chama `health_check` |
-| MCP | Descoberta/chamada via stdio; HTTP JSON sem SSE desativado por padrão |
-| Segredos | Ambiente e arquivos `*_FILE`; sem Vault, OAuth ou multitenancy implementados |
+| MCP | 11 ferramentas; revisões 2025-11-25 e 2025-06-18; schemas executados; erros JSON-RPC padronizados |
+| Transporte | stdio; HTTP JSON opcional (desligado por padrão), sem SSE/sessões/OAuth |
+| Segurança HTTP | Token por variável ou arquivo, escopos por token, Host/Origin, rate limit e limites por processo |
+| Delegação | OpenAI-compatible e Anthropic Messages; retry limitado; failover; cooldown por tipo de erro |
+| Roteamento | `first`, `round_robin`, diversidade de provider/modelo, custo e latência, com diversidade observada |
+| Consenso | Revisores em alvos distintos e síntese heurística rotulada como não verificada |
+| Custos | Limites de tokens, chamadas e custo por chamada/missão/projeto/dia; preços só por tabela explícita |
+| Providers | Inventário com flags de configuração, catálogo e inferência verificada; `verify_model` |
+| Memória | Schema versionado, integridade, locks com dono, journal com sequência, contexto em camadas, reparo |
+| Operação | Logs JSONL redigidos, métricas de processo, CLI (`doctor`, `providers`, `missions`, `memory repair`...) |
 
 **Não entregue esta prévia como um SaaS multitenant ou como execução autônoma
-completa de projetos.** Veja os limites em [Arquitetura](docs/ARCHITECTURE.md).
-O nome Universal descreve o objetivo de portabilidade; não é certificação de
-compatibilidade com todos os hosts ou versões do protocolo.
+completa de projetos.** Limites, contadores e orçamento são por processo. Veja
+[Arquitetura](docs/ARCHITECTURE.md). O nome Universal descreve o objetivo de portabilidade;
+não é certificação de compatibilidade com todos os hosts.
 
 ## Começar no computador
 
-Extraia o pacote ou, depois da publicação, clone o repositório. Na pasta do projeto:
+Clone o repositório e, na pasta do projeto:
 
 ```bash
 node --version
 npm run check
 npm test
 node scripts/install-harness.mjs all
+node src/index.js doctor
 ```
 
-Use Node.js 22 ou superior mantido pelo projeto Node.js. Não é necessário
-`npm install`: o código usa módulos nativos. O campo `private: true` em `package.json`
-apenas impede publicação acidental no npm; não torna o código proprietário.
+Não é necessário `npm install`: o código usa apenas módulos nativos do Node.js 22+.
+O campo `private: true` em `package.json` só impede publicação acidental no npm.
 
 **Linux/macOS:** `bash scripts/install-local.sh` cria `.env` se ausente, preserva uma
 configuração existente, executa a regressão e gera snippets.
 
 **Windows (PowerShell):** `./scripts/install-windows.ps1` realiza as mesmas etapas.
-Não desabilite políticas de segurança globais para executar o script.
 
-O repositório público contém **somente `.env.example`**. Os instaladores criam o `.env`
-privado no computador. Para configuração manual, copie o exemplo apenas quando
-não houver `.env`. O processo lê o `.env` da instalação, não o do projeto do harness.
-
-Exemplo inicial, limitado a um servidor local que você precisa instalar/iniciar:
+O repositório contém **somente `.env.example`**. O processo lê o `.env` da instalação,
+não o do projeto do harness. Exemplo inicial com um servidor local que você precisa iniciar:
 
 ```env
 DZ23_ROTATION=custom:qwen3-coder
@@ -96,17 +93,18 @@ CUSTOM_MODEL=qwen3-coder
 DZ23_ALLOW_PAID=false
 ```
 
-Troque `qwen3-coder` pelo ID realmente disponível no seu servidor. Nenhum modelo
-é baixado ou iniciado por este pacote. Para cloud, configure a chave em privado,
-consulte `discover_models`, escolha um modelo habilitado e só então acrescente
-`provider:model` à rotação. O ID do modelo pode conter dois-pontos.
+Para nuvem: configure a chave em privado, rode `discover_models`, confirme com
+`verify_model` (`confirm_billable: true`) e só então acrescente `provider:model` à rotação.
 
-**Atenção a custos:** `free-first` ordena categorias; não consulta a fatura nem
-impõe um teto financeiro. `DZ23_ALLOW_PAID=false` bloqueia categorias `paid` e
-`low-cost`, inclusive alvos explícitos. Categorias `mixed` e `free-tier` podem
-cobrar após limites da conta. Para evitar uso cloud, mantenha a rotação apenas
-nos seus servidores locais. Configure limites de gasto no fornecedor.
-`health_check`, `delegate`, `consensus` e `swarm_run` podem consumir quota/créditos.
+## Custos e orçamento
+
+`free-first` apenas ordena categorias. `DZ23_ALLOW_PAID=false` bloqueia `paid` e `low-cost`,
+inclusive alvos explícitos. Para limitar gasto, defina uma tabela de preços
+(`DZ23_PRICES_FILE`), `DZ23_COST_POLICY=deny_unknown_cost` e limites como
+`DZ23_MAX_DAILY_COST_USD`, `DZ23_MAX_MISSION_COST_USD` ou `DZ23_MAX_MISSION_CALLS`.
+O orçamento é verificado antes de cada chamada, inclusive retries, revisores e `health_check`.
+Preços nunca são inventados: sem tabela, o custo aparece como `unknown`. Configure também
+limites de gasto no fornecedor. Detalhes em [Operação](docs/OPERATIONS.md#orçamento).
 
 ## Conectar o harness
 
@@ -119,47 +117,52 @@ config/generated/codex_config.snippet.toml
 ```
 
 Copie somente a entrada `dz23-subagents` para o arquivo do cliente correspondente.
-O gerador usa os caminhos reais do Node e da instalação. Hermes e outros clientes
-precisam mapear `command`, `args` e transporte stdio ao próprio formato.
-
+Hermes e outros clientes precisam mapear `command`, `args` e transporte stdio ao próprio formato.
 [Guia completo](docs/INSTALL_ANY_HARNESS.md) · [Prompt para o harness](HERMES_SELF_INSTALL_PROMPT.txt)
+
+## CLI operacional
+
+```bash
+node src/index.js doctor --json
+node src/index.js config validate
+node src/index.js providers
+node src/index.js missions list
+node src/index.js memory repair
+node src/index.js health --yes
+```
+
+Nenhum comando imprime segredos; `health` exige `--yes` porque pode cobrar e
+`memory repair --apply` exige `--yes`. Códigos de saída: 0, 1, 2 e 78.
 
 ## Exemplo de uso pela IA
 
-Peça ao harness:
-
 > Use o MCP dz23-subagents. Registre o projeto `minha-app` e a missão `m-001`.
 > Consulte o inventário sem expor segredos. Delegue análises de backend, frontend
-> e QA com `swarm_run`, limite de três agentes. Revise as propostas antes de editar
-> arquivos. Execute os testes localmente. Salve o próximo passo com `memory_checkpoint`.
+> e QA com `swarm_run`, estratégia `provider_diversity`, limite de três agentes.
+> Revise as propostas antes de editar arquivos. Execute os testes localmente.
+> Salve decisões, critérios e o próximo passo com `memory_checkpoint`.
 
-Outro harness deve conectar à mesma memória, chamar `mission_status` com os mesmos
-IDs, conferir Git/arquivos/testes por conta própria e continuar. O roteador não
-abre automaticamente Codex quando a assinatura do Claude chega ao limite.
+Outro harness conecta à mesma memória, chama `mission_status` com os mesmos IDs,
+confere Git/arquivos/testes por conta própria e continua.
 
 ## Testes e publicação
-
-No Windows, extraia em uma pasta nova e abra **`PUBLICAR_WINDOWS.cmd`** para
-publicar usando GitHub CLI já autenticado. Ele encontra a pasta correta sem
-digitar caminhos e mantém todas as verificações do publicador.
 
 ```bash
 npm run check
 npm test
 npm run check:release
-node scripts/publish-github.mjs --public --dry-run
+npm run check:public
 ```
 
-O dry-run não chama GitHub nem cria commits. A publicação real exige Git, GitHub CLI,
-autenticação local e o comando sem `--dry-run`.
-[Publicar no GitHub](docs/PUBLISH_GITHUB.md) explica permissões, verificação e recuperação.
-Não se presume que o repositório já esteja publicado apenas porque este README existe.
+CI roda lint, testes em Linux/Windows com Node 22/24, contratos MCP por fixtures, relatório de
+cobertura e auditoria dos arquivos públicos. Os testes usam apenas fixtures locais, sem credenciais.
+[Publicar no GitHub](docs/PUBLISH_GITHUB.md) descreve a primeira publicação e as atualizações.
 
 ## Contribuir
 
 Leia [CONTRIBUTING.md](CONTRIBUTING.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md),
 [SECURITY.md](SECURITY.md) e [ROADMAP](docs/ROADMAP.md). Relatórios devem separar
-mocks, testes locais e validação real de provedores. Sem benchmarks comparativos,
+fixtures, testes locais e validação real de provedores. Sem benchmarks comparativos,
 não alegamos que o produto seja mais rápido ou melhor que outros roteadores.
 
 ## Licença

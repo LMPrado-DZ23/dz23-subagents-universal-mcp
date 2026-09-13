@@ -2,63 +2,59 @@
 
 **One project. Multiple models. Shared mission memory.**
 
-[Português / full guide](README.md) · [Installation](docs/INSTALL_ANY_HARNESS.md) · [Security](SECURITY.md)
+[Português / full guide](README.md) · [Tools](docs/TOOLS.md) · [Operations](docs/OPERATIONS.md) · [Architecture](docs/ARCHITECTURE.md) · [Security](SECURITY.md)
 
-Self-hosted MCP text-delegation router, shared filesystem mission memory, provider
-failover and bounded parallel specialist model calls. Version 2.2.5 is an
-**engineering preview**, licensed MIT, with Node.js 22+ and no runtime npm dependencies.
+Self-hosted MCP router for delegating text/code tasks to AI models, running parallel
+specialists and keeping explicit, versioned mission memory that another harness can resume.
+Version 2.3.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
 
-Workers return text/code. They do not automatically execute shell commands, edit
-repositories, use browsers or run tests. The host harness owns those operations.
-Handoff works through explicit persisted state, not invisible model thoughts or
-unrecorded client conversations. Another harness must connect and resume explicitly.
+Workers return text/code. They do not execute shell commands, edit repositories, use browsers
+or run tests; the host harness owns those operations. Handoff works through persisted state,
+not hidden model thoughts or unrecorded client conversations.
+
+## What 2.3.0 provides
+
+- **MCP**: 11 tools, protocol revisions 2025-11-25 and 2025-06-18, enforced closed schemas with
+  bounded inputs, standard JSON-RPC errors, tool execution errors with `request_id`.
+- **HTTP (opt-in)**: bearer token from env or file, optional per-token scopes (SHA-256 digests),
+  Host/Origin checks, per-process rate limiting with 429 + Retry-After, body/time/in-flight limits,
+  graceful shutdown. No SSE, sessions or OAuth.
+- **Providers**: OpenAI-compatible and Anthropic Messages adapters, 13-kind error taxonomy, bounded
+  retries only for rate limits/timeouts/unavailability, no failover for invalid requests,
+  per-kind cooldowns, `verify_model` (requires `confirm_billable: true`), catalog capabilities
+  reported as `unknown` when undeclared.
+- **Routing**: `first`, `round_robin`, `provider_diversity`, `model_diversity`, `cost_optimized`,
+  `latency_optimized`; requested vs effective strategy and observed diversity are reported.
+  `consensus` uses distinct targets and a labeled heuristic synthesis.
+- **Budgets**: input tokens, mission calls/tokens, per-call/mission/project/daily cost limits,
+  `allow_unknown_cost`/`deny_unknown_cost`, prices only from an explicit table, usage records with
+  token and cost provenance.
+- **Memory**: schema versions with read-time migrations, integrity errors instead of silent resets,
+  owner-aware locks with safe orphan recovery, monotonic journal sequence, layered context with
+  truncation report, `memory repair`.
+- **Operations**: redacted JSON Lines logs on stderr, process metrics (`GET /metrics`), CLI
+  (`doctor`, `config validate`, `providers`, `health --yes`, `missions`, `memory repair`, `token hash`).
 
 ## Setup
 
-Run `bash scripts/install-local.sh` on Linux/macOS or
-`./scripts/install-windows.ps1` in PowerShell. The installer creates a private `.env`
-from `.env.example` only if absent, tests the source and generates reviewable
-Claude/Codex snippets without changing existing host configuration. No `npm install`
-is needed. Set the installed model ID, endpoint and credentials privately.
+Run `bash scripts/install-local.sh` on Linux/macOS or `./scripts/install-windows.ps1` in PowerShell.
+The installer creates a private `.env` from `.env.example` only if absent, runs the tests and
+generates reviewable Claude/Codex snippets without changing existing host configuration.
+Then run `node src/index.js doctor`.
 
-The sample rotation is local only. To add a cloud service, discover/configure an
-entitled model, add a `provider:model` target, and set supplier-side spending limits.
-`free-first` is a ranking policy, not free quota detection or a financial hard cap.
-With `DZ23_ALLOW_PAID=false`, `paid` and `low-cost` categories are excluded even for
-explicit targets. Mixed/free-tier services can still charge depending on the account.
-
-Tools: `list_models`, `provider_inventory`, `discover_models`, `health_check`,
-`project_init`, `mission_status`, `memory_checkpoint`, `delegate`, `consensus`, `swarm_run`.
+The sample rotation is local only. For cloud services: configure the key privately, discover models,
+verify inference explicitly, then add `provider:model` to the rotation, set a price table, a cost
+policy and budget limits, and configure supplier-side spending limits.
 
 ## Boundaries
 
-Use stdio locally. HTTP is disabled by default and, when explicitly enabled, must run
-behind TLS with a private bearer token. Non-loopback binds
-require at least 32 token characters; HTTP validates Host and Origin. There is no
-per-user authorization, OAuth server or tenant isolation. Treat one instance as a
-single trusted security domain. Vision, embeddings, provider tool calling and output
-streaming are not exposed. Model IDs and declared capabilities are not live proof.
+One instance is one trust domain; `project_id` is never authentication. Rate limits, budgets,
+cooldowns and metrics are per process. Memory writes are atomic per file but not transactional
+across files. Vision, embeddings, provider tool calling and output streaming are not exposed.
+Model IDs, catalog entries and declared capabilities are not live proof.
 
-Run `npm run check`, `npm test` and `npm run check:release`. GitHub Actions is configured
-for Linux/Windows and Node 22/24; configuring CI does not mean it has run remotely.
-The included publication script requires authenticated local GitHub CLI and refuses
-to overwrite repositories. See [publishing](docs/PUBLISH_GITHUB.md).
+Run `npm run check`, `npm test`, `npm run check:release` and `npm run check:public`. CI runs lint,
+Linux/Windows tests on Node 22/24, MCP contract fixtures, a coverage report and a public-file audit.
+See [publishing](docs/PUBLISH_GITHUB.md) and [validation](docs/VALIDATION.md).
 
 MIT copyright notice is retained. API credits and provider terms are separate.
-
-## v2.2.5 hardening
-
-Swarm roles prefer the first eligible target and use later targets only for failover.
-Roles are a strict enum; mission memory and prior model outputs are labeled untrusted.
-Queues, provider response bodies, stdio frames, stored outputs, journals and checkpoints
-are bounded. HTTP requires an explicit opt-in.
-
-## v2.2.4 correction
-
-Concurrency tests hold calls behind promise barriers, observe simultaneous in-flight
-work and queued calls, then release them. No passing assertion depends on a 30/40 ms
-response window. Watchdogs still fail stuck/serialized execution.
-
-Windows users may open `PUBLICAR_WINDOWS.cmd` from a fresh extracted folder to
-run the existing guarded first-publication workflow. Local validation here is Linux
-only; Windows/Node 24 and remote GitHub Actions are not claimed as passing.

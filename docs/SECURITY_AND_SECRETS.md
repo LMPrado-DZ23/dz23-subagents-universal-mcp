@@ -1,23 +1,38 @@
-# Configuração privada
+# Configuração privada e segredos
 
 Leia [SECURITY.md](../SECURITY.md). Não guarde credenciais em repositórios, prompts,
 exemplos, relatórios ou memória de projetos. O pacote público contém só `.env.example`.
 
-O runtime lê `.env` da pasta de instalação sem sobrescrever variáveis de ambiente
-já existentes. Para os providers, `KEY_FILE` lê o segredo de um arquivo montado. Se
-um arquivo explicitamente configurado for ilegível, o processo falha: não ignora o
-problema. Não há integração Vault implementada e `DZ23_MCP_TOKEN_FILE` não existe;
-passe o token HTTP por ambiente privado.
+## Onde ficam os segredos
 
-`ALIBABA_API_KEY` e `ALIBABA_BASE_URL` são separados de OpenAI: não substitua
-`OPENAI_API_KEY` global para usar Alibaba. Together aceita `TOGETHER_API_KEY` e o
-alias legado `TogetherAIAPI_KEY`; Hugging Face aceita `HUGGINGFACE_TOKEN`/`HF_TOKEN`.
+- O runtime lê o `.env` da pasta de instalação sem sobrescrever variáveis já existentes.
+- Providers aceitam `<NOME>_FILE` para ler a chave de um arquivo montado. Arquivo configurado
+  e ilegível interrompe a inicialização.
+- Token HTTP: `DZ23_MCP_TOKEN` **ou** `DZ23_MCP_TOKEN_FILE`. Definir os dois impede a
+  inicialização, para que a rotação do arquivo nunca seja sombreada. Espaços e quebras de linha
+  finais do arquivo são removidos; arquivo vazio ou ilegível falha explicitamente. Em POSIX,
+  permissões acessíveis a grupo/outros geram aviso: use `chmod 600`.
+- Tokens com escopo (`DZ23_AUTH_MODE=scoped`): `DZ23_MCP_TOKENS_FILE` guarda apenas o SHA-256
+  de cada token, com `id` e `scopes`. Gere o digest com
+  `printf %s "$TOKEN" | node src/index.js token hash`. O token primário, se configurado, continua
+  com todos os escopos. Revogar um token = remover a entrada e reiniciar o processo.
 
-Endpoints devem ser HTTP(S), sem usuário/senha, query ou fragmento. Não devolvemos
-corpos crus de erro de API, pois podem conter chaves/prompts ecoados. Isso não é
-um filtro universal de PII: entradas do usuário e saídas de modelos ainda podem
-conter dados sensíveis, que devem ser controlados pelo harness.
+Escopos: `memory:read`, `memory:write`, `delegate:execute`, `health:execute`,
+`provider:discover`, `admin:inventory` (este último também libera `/metrics`).
 
-O scanner de publicação verifica padrões conhecidos e arquivos permitidos; não
-prova ausência de todo segredo possível. O script publica somente PUBLIC_FILES.json
-e os caminhos listados nele; `.env`, estado, logs e configurações geradas ficam fora.
+## O que nunca sai do processo
+
+Valores de chaves e tokens não aparecem em inventário, resultados, erros, métricas, memória ou
+logs. `provider_inventory` mostra apenas a origem (`env:NOME`, `file:NOME_FILE`, `none`).
+Erros de provider são classificados por status e padrões e nunca retornam o corpo recebido.
+Falhas inesperadas aparecem como `internal_error`, sem mensagem interna ou caminho de arquivo.
+
+## Outros cuidados
+
+- `ALIBABA_API_KEY`/`ALIBABA_BASE_URL` são separados de OpenAI. Together aceita
+  `TogetherAIAPI_KEY`; Hugging Face aceita `HF_TOKEN`.
+- Endpoints devem ser HTTP(S) sem usuário/senha, query ou fragmento.
+- A redação de logs não é um filtro universal de PII: prompts do usuário e respostas de modelos
+  podem conter dados sensíveis na memória de missão, que precisa ser protegida pelo operador.
+- O scanner de publicação verifica padrões conhecidos e a allowlist; não prova ausência de todo
+  segredo possível. `npm run check:public` confirma que só arquivos auditados estão rastreados.

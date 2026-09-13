@@ -5,8 +5,8 @@
     {"name":"frontend","preferred_capabilities":["coding","ui","accessibility"]},
     {"name":"security","preferred_capabilities":["security","reasoning"]},
     {"name":"qa","preferred_capabilities":["testing","reasoning"]},
-    {"name":"devops","preferred_capabilities":["shell","infra","observability"]},
+    {"name":"devops","preferred_capabilities":["infra","observability"]},
     {"name":"reviewer","preferred_capabilities":["reasoning","code-review"]}
   ],
-  "note":"swarm_run accepts any custom role list. This file is a human-editable profile/reference; v2.0 does not require it at runtime."
+  "note":"Human-editable reference only. The runtime does not load this file; swarm_run accepts the strict role enum listed in docs/TOOLS.md."
 }

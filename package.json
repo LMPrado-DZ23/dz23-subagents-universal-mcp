@@ -1,6 +1,6 @@
 {
   "name": "@dz23/subagents-universal-mcp",
-  "version": "2.2.5",
+  "version": "2.3.0",
   "description": "MCP text delegation router with shared mission memory and bounded parallel model workers",
   "type": "module",
   "bin": {
@@ -9,9 +9,13 @@
   "scripts": {
     "start": "node src/index.js --stdio",
     "start:http": "node src/index.js --http",
+    "doctor": "node src/index.js doctor",
     "test": "node --test",
+    "test:contract": "node --test test/jsonrpc.test.js test/schema.test.js test/http-security.test.js test/verify.test.js",
+    "test:coverage": "node --test --experimental-test-coverage",
     "check": "node scripts/check.mjs",
     "check:release": "node scripts/release-check.mjs",
+    "check:public": "node scripts/audit-public-files.mjs",
     "publish:github": "node scripts/publish-github.mjs"
   },
   "engines": {

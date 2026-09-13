@@ -1,4 +1,7 @@
-HTTP MCP endpoint: https://YOUR_CONFIGURED_HOST/mcp
-Bearer token required from private runtime configuration.
+HTTP MCP endpoint: https://YOUR_CONFIGURED_HOST/mcp (POST JSON only; no SSE, sessions or OAuth).
+Bearer token from private runtime configuration: DZ23_MCP_TOKEN or DZ23_MCP_TOKEN_FILE (never both).
+Optional per-client scopes: DZ23_AUTH_MODE=scoped with DZ23_MCP_TOKENS_FILE (see scoped-tokens.example.json).
 Set exact DZ23_ALLOWED_HOSTS and, only if needed, DZ23_ALLOWED_ORIGINS.
-Read docs/INSTALL_ANY_HARNESS.md. Hosted client compatibility is not certified.
+Clients should send MCP-Protocol-Version (2025-11-25 or 2025-06-18) after initialize.
+Expect 429 with Retry-After when the per-process rate limit is exceeded.
+Read docs/INSTALL_ANY_HARNESS.md and docs/OPERATIONS.md. Hosted client compatibility is not certified.

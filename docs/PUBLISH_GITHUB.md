@@ -78,6 +78,18 @@ Para futuros commits, trabalhe por branch/PR, preserve testes e atualize o manif
 com `node scripts/update-manifest.mjs` após revisar os arquivos públicos. A atualização
 dos hashes não substitui revisão humana. Revise mudanças de LICENSE separadamente.
 
+## Atualizações de um repositório já publicado
+
+`scripts/publish-github.mjs` serve apenas para a primeira publicação e recusa `.git`
+existente. Para versões seguintes:
+
+1. Trabalhe em um branch, rode `npm run check`, `npm test`, regenere o manifesto com
+   `node scripts/update-manifest.mjs`, depois `npm run check:release` e `npm run check:public`.
+2. Envie o branch e aguarde o GitHub Actions concluir com sucesso.
+3. Integre em `main` sem force-push, crie a tag `vX.Y.Z` no commit verificado e publique a
+   release apontando para essa tag.
+4. Confirme remotamente o commit da tag, a visibilidade e o resultado do CI antes de anunciar.
+
 Fontes oficiais consultadas em 2026-09-12:
 - https://cli.github.com/manual/gh_auth_login
 - https://cli.github.com/manual/gh_repo_create

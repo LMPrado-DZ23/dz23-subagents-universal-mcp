@@ -1,0 +1,14 @@
+{
+  "tokens": [
+    {
+      "id": "ci-reader",
+      "sha256": "REPLACE_WITH_OUTPUT_OF_dz23-subagents_token_hash",
+      "scopes": ["memory:read", "provider:discover"]
+    },
+    {
+      "id": "delegating-harness",
+      "sha256": "REPLACE_WITH_OUTPUT_OF_dz23-subagents_token_hash",
+      "scopes": ["memory:read", "memory:write", "delegate:execute", "provider:discover"]
+    }
+  ]
+}
