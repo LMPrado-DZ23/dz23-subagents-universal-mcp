@@ -29,7 +29,7 @@ const logger = createLogger({level: cfg.logLevel});
 logger.addSecrets([cfg.token]);
 for (const issue of cfg.configIssues) logger[issue.level === 'error' ? 'error' : 'warn']('config_issue', issue);
 const metrics = new Metrics();
-const memory = new ProjectMemory(cfg.stateDir, cfg);
+const memory = new ProjectMemory(cfg.stateDir, {...cfg, logger});
 const router = new Router(cfg, memory, {logger, metrics});
 const handler = createMcpHandler(router, memory, {logger, metrics});
 let server = null;

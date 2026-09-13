@@ -17,7 +17,6 @@ const allowedSwarmRoles = new Set(SWARM_ROLES);
 const isoNow = () => new Date().toISOString();
 const uniq = items => [...new Set(items)];
 const realSleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const TRUNCATION_MARKER = '...[older context truncated]';
 
 function assertRole(role) {
   if (!allowedRoles.has(role)) throw new ToolError('invalid_request', `Unsupported role: ${safeText(role, 40)}`);
@@ -271,9 +270,9 @@ export class Router {
   }
 
   async contextFor(projectId, missionId) {
-    const text = await this.memory.contextBundle(projectId, missionId, this.cfg.maxContextChars);
-    if (text.startsWith(TRUNCATION_MARKER)) this.metrics?.increment('context_truncations_total');
-    return text;
+    const bundle = await this.memory.contextBundleDetailed(projectId, missionId, this.cfg.maxContextChars);
+    for (const section of bundle.truncated_sections) this.metrics?.increment('context_truncations_total', {section});
+    return bundle.text;
   }
 
   retryDelay(error, attempt) {

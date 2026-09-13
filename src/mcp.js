@@ -67,10 +67,11 @@ function toolRunner(router, memory) {
     health_check: (_args, ctx) => router.healthCheck({request_id: ctx.requestId}),
     verify_model: (args, ctx) => router.verifyModel(withRequest(args, ctx)),
     project_init: ({project_id, ...fields}) => memory.initProject(project_id, fields),
-    mission_status: async ({project_id, mission_id, events_limit}) => ({
-      state: await memory.getMission(project_id, mission_id),
-      recent_events: await memory.recentEvents(project_id, mission_id, events_limit)
-    }),
+    mission_status: async ({project_id, mission_id, events_limit}) => {
+      const journal = await memory.readJournal(project_id, mission_id, events_limit);
+      return {state: await memory.getMission(project_id, mission_id), recent_events: journal.events,
+        journal_integrity: {invalid_lines: journal.invalid_lines, last_seq: journal.last_seq}};
+    },
     memory_checkpoint: ({project_id, mission_id, merge, ...fields}) => memory.recordCheckpoint(project_id, mission_id, fields, {merge}),
     delegate: (args, ctx) => router.delegate(withRequest(args, ctx)),
     consensus: (args, ctx) => router.consensus(withRequest(args, ctx)),

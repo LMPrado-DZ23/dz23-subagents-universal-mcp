@@ -86,7 +86,7 @@ test('tools/call: unknown tool, invalid arguments and valid defaults', async t =
   assert.deepEqual(extra.error.data, {field: 'verbose', reason: 'is not allowed'});
   const ok = (await process(call(4, 'mission_status', {project_id: 'p', mission_id: 'm'}))).response;
   assert.equal(ok.result.isError, undefined);
-  assert.deepEqual(ok.result.structuredContent, {state: null, recent_events: []});
+  assert.deepEqual(ok.result.structuredContent, {state: null, recent_events: [], journal_integrity: {invalid_lines: 0, last_seq: 0}});
   const list = (await process(call(5, 'list_models', {}))).response;
   assert.ok(Array.isArray(list.result.structuredContent.items), 'arrays are wrapped for structuredContent');
   await memory.initProject('p');

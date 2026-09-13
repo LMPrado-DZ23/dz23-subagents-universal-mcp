@@ -1,228 +1,264 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import {ToolError} from './errors.js';
 import {addUsage} from './usage.js';
+import {SCHEMA_VERSIONS} from './constants.js';
+import {atomicJson, readJson, readTextFile, appendBoundedLine, relativePath, MISSING} from './fsutil.js';
+import {KeyedMutex, withDirLock} from './locks.js';
+import {appendJournalEvent, readJournal} from './journal.js';
+import {newProject, newMission, migrateProject, migrateMission} from './memory-schema.js';
+import {buildContext} from './context.js';
+import {isPlainObject} from './schema.js';
+import {nullLogger} from './logger.js';
 
-const sleep = ms => new Promise(r=>setTimeout(r,ms));
-const transientLockErrors = new Set(['EEXIST','EPERM','EBUSY','ENOTEMPTY']);
-const safe = s => {
-  if (typeof s !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/.test(s)) {
+const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/;
+const CHECKPOINT_LISTS = ['acceptance_criteria', 'decisions', 'invariants', 'completed_tasks', 'active_tasks', 'blocked_tasks', 'next_tasks', 'known_failures', 'files_read', 'files_changed', 'artifacts'];
+const CHECKPOINT_SCALARS = ['next_action', 'status', 'summary', 'goal'];
+
+function safe(value) {
+  if (typeof value !== 'string' || !ID.test(value)) {
     throw new Error('Invalid memory identifier: use 1-120 letters, digits, dots, underscores or hyphens; start with a letter or digit');
   }
-  return s;
-};
-async function ensureDir(p){ await fs.mkdir(p,{recursive:true,mode:0o700}); }
-// Windows refuses rename/read while another handle briefly holds the file (EPERM/EACCES/EBUSY).
-const transientIoErrors = new Set(['EPERM','EACCES','EBUSY']);
-const IO_RETRIES = 40;
-async function atomicJson(file,obj){
-  await ensureDir(path.dirname(file));
-  const tmp=`${file}.${process.pid}.${crypto.randomUUID()}.tmp`;
-  await fs.writeFile(tmp,JSON.stringify(obj,null,2),{mode:0o600});
-  for(let i=0;;i++){
-    try{await fs.rename(tmp,file);return;}
-    catch(e){
-      if(!transientIoErrors.has(e.code)||i>=IO_RETRIES){await fs.rm(tmp,{force:true}).catch(()=>{});throw new ToolError('memory_write_failed','Memory file stayed busy; the write was not completed');}
-      await sleep(5+Math.random()*10*Math.min(i+1,10));
-    }
-  }
-}
-async function readJson(file,fallback){
-  for(let i=0;;i++){
-    try{return JSON.parse(await fs.readFile(file,'utf8'));}
-    catch(e){
-      if(e.code==='ENOENT')return fallback;
-      if(transientIoErrors.has(e.code)&&i<IO_RETRIES){await sleep(5+Math.random()*10);continue;}
-      throw e;
-    }
-  }
+  return value;
 }
 
-/** Append one line; when the file grows past maxBytes keep only the newest 75%. */
-async function appendBoundedLine(file,line,maxBytes){
-  await ensureDir(path.dirname(file)); await fs.appendFile(file,line+'\n',{mode:0o600});
-  const stat=await fs.stat(file); if(stat.size<=maxBytes)return;
-  const lines=(await fs.readFile(file,'utf8')).trim().split('\n').filter(Boolean); const kept=[]; let bytes=0;
-  for(let i=lines.length-1;i>=0;i--){const size=Buffer.byteLength(lines[i]+'\n');if(bytes+size>Math.floor(maxBytes*0.75))break;kept.unshift(lines[i]);bytes+=size;}
-  await fs.writeFile(file,kept.join('\n')+'\n',{mode:0o600});
-}
-
-const CHECKPOINT_LISTS=['acceptance_criteria','decisions','invariants','completed_tasks','active_tasks','blocked_tasks','next_tasks','known_failures','files_read','files_changed','artifacts'];
-const CHECKPOINT_SCALARS=['next_action','status','summary','goal'];
-function mergeList(current,incoming,merge){
-  if(merge==='replace')return [...incoming];
-  const out=[...(Array.isArray(current)?current:[])];const seen=new Set(out.map(x=>JSON.stringify(x)));
-  for(const item of incoming){const key=JSON.stringify(item);if(!seen.has(key)){seen.add(key);out.push(item);}}
+function mergeList(current, incoming, merge) {
+  if (merge === 'replace') return [...incoming];
+  const out = [...(Array.isArray(current) ? current : [])];
+  const seen = new Set(out.map(item => JSON.stringify(item)));
+  for (const item of incoming) {
+    const key = JSON.stringify(item);
+    if (!seen.has(key)) { seen.add(key); out.push(item); }
+  }
   return out;
 }
-/** Only provided fields change; omitted status keeps the current status. */
-export function mergeCheckpointFields(state,fields,merge='append'){
-  const patch={};
-  for(const key of CHECKPOINT_SCALARS)if(fields[key]!==undefined)patch[key]=fields[key];
-  for(const key of CHECKPOINT_LISTS)if(fields[key]!==undefined)patch[key]=mergeList(state?.[key],fields[key],merge);
-  if(fields.tests){const cur=state?.tests||{};patch.tests={...cur};for(const k of ['passed','failed','pending'])if(fields.tests[k])patch.tests[k]=mergeList(cur[k],fields.tests[k],merge);}
+
+/** Only provided fields change; an omitted status keeps the current status. */
+export function mergeCheckpointFields(state, fields, merge = 'append') {
+  const patch = {};
+  for (const key of CHECKPOINT_SCALARS) if (fields[key] !== undefined) patch[key] = fields[key];
+  for (const key of CHECKPOINT_LISTS) if (fields[key] !== undefined) patch[key] = mergeList(state?.[key], fields[key], merge);
+  if (fields.tests) {
+    const current = state?.tests || {};
+    patch.tests = {...current};
+    for (const key of ['passed', 'failed', 'pending']) if (fields.tests[key]) patch.tests[key] = mergeList(current[key], fields.tests[key], merge);
+  }
   return patch;
 }
 
-/**
- * In-process serialization per key (project directory). Readers and writers of one process
- * never overlap, so Windows cannot refuse a rename because this process holds the file open.
- * Not reentrant: code inside a locked section must use readJson directly.
- */
-class KeyedMutex {
-  constructor(){ this.tails=new Map(); }
-  async run(key,fn){
-    const previous=this.tails.get(key)||Promise.resolve();
-    let release; const gate=new Promise(resolve=>{release=resolve;});
-    const tail=previous.then(()=>gate); this.tails.set(key,tail);
-    await previous;
-    try{return await fn();}
-    finally{release(); if(this.tails.get(key)===tail)this.tails.delete(key);}
+async function listIds(dir) {
+  try {
+    return (await fs.readdir(dir, {withFileTypes: true})).filter(entry => entry.isDirectory() && ID.test(entry.name)).map(entry => entry.name).sort();
+  } catch (error) {
+    if (error.code === 'ENOENT') return [];
+    throw error;
   }
 }
 
+/**
+ * Filesystem mission memory. Layout under the state root:
+ * projects/<project>/project.json, projects/<project>/missions/<mission>/{state.json,journal.jsonl,usage.jsonl,checkpoints/},
+ * usage/daily/<YYYY-MM-DD>.json and providers/status.json.
+ */
 export class ProjectMemory {
-  constructor(root, options={}){
-    this.root=root;
-    this.maxStoredOutputChars=options.maxStoredOutputChars||12000;
-    this.maxAgentOutputs=options.maxAgentOutputs||16;
-    this.maxJournalBytes=options.maxJournalBytes||1024*1024;
-    this.maxEventBytes=Math.max(4096,Math.min(65536,Math.floor(this.maxJournalBytes/4)));
-    this.maxCheckpoints=options.maxCheckpoints||8;
-    this.local=new KeyedMutex();
+  constructor(root, options = {}) {
+    this.root = root;
+    this.maxStoredOutputChars = options.maxStoredOutputChars || 12_000;
+    this.maxAgentOutputs = options.maxAgentOutputs || 16;
+    this.maxJournalBytes = options.maxJournalBytes || 1024 * 1024;
+    this.maxEventBytes = Math.max(4096, Math.min(65_536, Math.floor(this.maxJournalBytes / 4)));
+    this.maxCheckpoints = options.maxCheckpoints || 8;
+    this.lockTimeoutMs = options.lockTimeoutMs || 20_000;
+    this.lockStaleMs = options.lockStaleMs || 30_000;
+    this.durable = options.durableWrites !== false;
+    this.logger = options.logger || nullLogger;
+    this.local = new KeyedMutex();
   }
-  projectDir(projectId){ return path.join(this.root,'projects',safe(projectId)); }
-  missionDir(projectId,missionId){ return path.join(this.projectDir(projectId),'missions',safe(missionId)); }
-  async withLock(projectId, fn){ const dir=this.projectDir(projectId); return this.local.run(dir,()=>this.lockAt(dir, fn)); }
-  async lockAt(dir, fn){
-    await ensureDir(dir); const lock=path.join(dir,'.lock');
-    let acquired=false;
-    for(let i=0;i<500;i++){ try{await fs.mkdir(lock,{mode:0o700});acquired=true;break;}catch(e){if(!transientLockErrors.has(e.code))throw e;await sleep(20+Math.random()*30);} }
-    if(!acquired) throw new ToolError('lock_timeout',`Memory lock timeout for ${path.basename(dir)}`);
-    try{return await fn();}finally{
-      for(let i=0;i<20;i++){try{await fs.rm(lock,{recursive:true,force:true});break;}catch(e){if(!transientLockErrors.has(e.code)||i===19)throw e;await sleep(20+Math.random()*30);}}
-    }
+
+  projectDir(projectId) { return path.join(this.root, 'projects', safe(projectId)); }
+  missionDir(projectId, missionId) { return path.join(this.projectDir(projectId), 'missions', safe(missionId)); }
+  projectFile(projectId) { return path.join(this.projectDir(projectId), 'project.json'); }
+  missionFile(projectId, missionId) { return path.join(this.missionDir(projectId, missionId), 'state.json'); }
+  journalFile(projectId, missionId) { return path.join(this.missionDir(projectId, missionId), 'journal.jsonl'); }
+  checkpointDir(projectId, missionId) { return path.join(this.missionDir(projectId, missionId), 'checkpoints'); }
+  usageDir() { return path.join(this.root, 'usage', 'daily'); }
+  providersDir() { return path.join(this.root, 'providers'); }
+
+  /** Process-local serialization plus the cross-process directory lock. */
+  lockAt(dir, fn) {
+    return this.local.run(dir, () => withDirLock(dir, fn, {timeoutMs: this.lockTimeoutMs, staleMs: this.lockStaleMs,
+      onRecovered: inspection => this.logger.warn('memory_lock_recovered', {lock: path.basename(dir), reason: inspection.reason, owner_pid: inspection.owner?.pid, age_ms: inspection.age_ms})}));
   }
-  async initProject(projectId, data={}){
-    return this.withLock(projectId, async()=>{
-      const file=path.join(this.projectDir(projectId),'project.json');
-      const prev=await readJson(file,null);
-      const now=new Date().toISOString();
-      const obj=prev||{schema:1,project_id:projectId,created_at:now,decisions:[],facts:[],artifacts:[],agents:[]};
-      Object.assign(obj,data,{updated_at:now}); await atomicJson(file,obj); return obj;
-    });
+
+  withLock(projectId, fn) { return this.lockAt(this.projectDir(projectId), fn); }
+  readLocked(dir, fn) { return this.local.run(dir, fn); }
+  write(file, value) { return atomicJson(file, value, {durable: this.durable}); }
+
+  async readRecord(file, migrate) {
+    const value = await readJson(file, MISSING, {root: this.root});
+    if (value === MISSING) return null;
+    if (!isPlainObject(value)) throw new ToolError('memory_integrity', 'Memory record has an invalid shape; run memory repair', {kind: 'corrupt_shape', file: relativePath(this.root, file)});
+    return migrate(value);
   }
-  async getProject(projectId){const dir=this.projectDir(projectId);return this.local.run(dir,()=>readJson(path.join(dir,'project.json'),null));}
-  async startMission(projectId, missionId, data={}){
-    await this.initProject(projectId);
-    return this.withLock(projectId, async()=>{
-      const file=path.join(this.missionDir(projectId,missionId),'state.json'); const now=new Date().toISOString();
-      const prev=await readJson(file,null);
-      const obj=prev||{schema:1,project_id:projectId,mission_id:missionId,created_at:now,sequence:0,status:'active',goal:'',acceptance_criteria:[],completed_tasks:[],active_tasks:[],blocked_tasks:[],next_tasks:[],decisions:[],known_failures:[],files_read:[],files_changed:[],artifacts:[],tests:{passed:[],failed:[],pending:[]},agents:[]};
-      Object.assign(obj,data,{updated_at:now}); await atomicJson(file,obj); return obj;
-    });
-  }
-  async getMission(projectId,missionId){const file=path.join(this.missionDir(projectId,missionId),'state.json');return this.local.run(this.projectDir(projectId),()=>readJson(file,null));}
-  async updateMission(projectId,missionId, patch={}){
-    return this.withLock(projectId, async()=>{
-      const file=path.join(this.missionDir(projectId,missionId),'state.json'); const cur=await readJson(file,null); if(!cur) throw new Error('Mission not found');
-      const next={...cur,...patch,sequence:(cur.sequence||0)+1,updated_at:new Date().toISOString()}; await atomicJson(file,next); return next;
+
+  async initProject(projectId, data = {}) {
+    return this.withLock(projectId, async () => {
+      const now = new Date().toISOString();
+      const project = (await this.readRecord(this.projectFile(projectId), migrateProject)) || newProject(projectId, now);
+      const next = {...project, ...data, updated_at: now};
+      await this.write(this.projectFile(projectId), next);
+      return next;
     });
   }
 
-  async recordAgentResult(projectId,missionId, agent, output){
-    return this.withLock(projectId, async()=>{
-      const file=path.join(this.missionDir(projectId,missionId),'state.json'); const cur=await readJson(file,null); if(!cur) throw new Error('Mission not found');
-      const content=String(output??'').slice(0,this.maxStoredOutputChars);
-      const agents=[...(cur.agents||[]),agent].slice(-this.maxAgentOutputs*2);
-      const agent_outputs=[...(cur.agent_outputs||[]),{agent_id:agent.id,role:agent.role,provider:agent.provider,model:agent.model,content,at:new Date().toISOString()}].slice(-this.maxAgentOutputs);
-      const next={...cur,sequence:(cur.sequence||0)+1,updated_at:new Date().toISOString(),agents,agent_outputs,last_output:content,last_provider:agent.provider,last_model:agent.model};
-      await atomicJson(file,next); return next;
+  getProject(projectId) {
+    return this.readLocked(this.projectDir(projectId), () => this.readRecord(this.projectFile(projectId), migrateProject));
+  }
+
+  async startMission(projectId, missionId, data = {}) {
+    await this.initProject(projectId);
+    return this.withLock(projectId, async () => {
+      const now = new Date().toISOString();
+      const mission = (await this.readRecord(this.missionFile(projectId, missionId), migrateMission)) || newMission(projectId, missionId, now);
+      const next = {...mission, ...data, updated_at: now};
+      await this.write(this.missionFile(projectId, missionId), next);
+      return next;
     });
   }
-  async appendEvent(projectId,missionId,type,payload={}){
-    const ev={id:crypto.randomUUID(),ts:new Date().toISOString(),type,payload};
-    let line=JSON.stringify(ev);
-    if(Buffer.byteLength(line)>this.maxEventBytes){ev.payload={truncated:true,original_bytes:Buffer.byteLength(line)};line=JSON.stringify(ev);}
-    return this.withLock(projectId, async()=>{
-      const dir=this.missionDir(projectId,missionId); await ensureDir(dir);
-      const journal=path.join(dir,'journal.jsonl');
-      await fs.appendFile(journal,line+'\n',{mode:0o600});
-      const stat=await fs.stat(journal);
-      if(stat.size>this.maxJournalBytes){
-        const text=await fs.readFile(journal,'utf8');
-        const lines=text.trim().split('\n').filter(Boolean);const kept=[];let bytes=0;
-        for(let i=lines.length-1;i>=0;i--){const lineBytes=Buffer.byteLength(lines[i]+'\n');if(bytes+lineBytes>Math.floor(this.maxJournalBytes*0.75))break;kept.unshift(lines[i]);bytes+=lineBytes;}
-        await fs.writeFile(journal,kept.join('\n')+'\n',{mode:0o600});
-      }
-      return ev;
+
+  getMission(projectId, missionId) {
+    return this.readLocked(this.projectDir(projectId), () => this.readRecord(this.missionFile(projectId, missionId), migrateMission));
+  }
+
+  async mutateMission(projectId, missionId, mutate) {
+    return this.withLock(projectId, async () => {
+      const current = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
+      if (!current) throw new ToolError('mission_not_found', 'Mission not found');
+      const next = mutate(current);
+      await this.write(this.missionFile(projectId, missionId), next);
+      return next;
     });
   }
-  async checkpoint(projectId,missionId, extra={}){
-    return this.withLock(projectId, async()=>{
-      const state=await readJson(path.join(this.missionDir(projectId,missionId),'state.json'),null); if(!state) throw new ToolError('mission_not_found','Mission not found');
-      const seq=(state.sequence||0)+1; const cp={...state,...extra,sequence:seq,checkpoint_at:new Date().toISOString()};
-      const dir=path.join(this.missionDir(projectId,missionId),'checkpoints'); await ensureDir(dir); await atomicJson(path.join(dir,`${String(seq).padStart(6,'0')}.json`),cp); await atomicJson(path.join(this.missionDir(projectId,missionId),'state.json'),cp);
-      const checkpoints=(await fs.readdir(dir)).filter(x=>/^\d{6}\.json$/.test(x)).sort();
-      await Promise.all(checkpoints.slice(0,-this.maxCheckpoints).map(x=>fs.rm(path.join(dir,x),{force:true})));
-      return cp;
+
+  updateMission(projectId, missionId, patch = {}) {
+    return this.mutateMission(projectId, missionId, current => ({...current, ...patch, sequence: (current.sequence || 0) + 1, updated_at: new Date().toISOString()}));
+  }
+
+  recordAgentResult(projectId, missionId, agent, output) {
+    return this.mutateMission(projectId, missionId, current => {
+      const content = String(output ?? '').slice(0, this.maxStoredOutputChars);
+      const at = new Date().toISOString();
+      return {
+        ...current, sequence: (current.sequence || 0) + 1, updated_at: at,
+        agents: [...(current.agents || []), {schema: SCHEMA_VERSIONS.agent, ...agent}].slice(-this.maxAgentOutputs * 2),
+        agent_outputs: [...(current.agent_outputs || []), {schema: SCHEMA_VERSIONS.agent, agent_id: agent.id, role: agent.role, provider: agent.provider, model: agent.model, content, at}].slice(-this.maxAgentOutputs),
+        last_output: content, last_provider: agent.provider, last_model: agent.model
+      };
     });
   }
-  usageDir(){ return path.join(this.root,'usage','daily'); }
-  async getDailyUsage(day){ return this.local.run(this.usageDir(),()=>readJson(path.join(this.usageDir(),`${day}.json`),null)); }
+
+  async appendEvent(projectId, missionId, type, payload = {}) {
+    return this.withLock(projectId, async () => {
+      const {event, recovered} = await appendJournalEvent(this.journalFile(projectId, missionId), type, payload,
+        {maxJournalBytes: this.maxJournalBytes, maxEventBytes: this.maxEventBytes, durable: this.durable});
+      if (recovered) this.logger.warn('journal_recovered', {project_id: projectId, mission_id: missionId, reason: 'incomplete_trailing_line'});
+      return event;
+    });
+  }
+
+  async checkpoint(projectId, missionId, extra = {}) {
+    return this.withLock(projectId, async () => {
+      const state = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
+      if (!state) throw new ToolError('mission_not_found', 'Mission not found');
+      const sequence = (state.sequence || 0) + 1;
+      const snapshot = {...state, ...extra, sequence, checkpoint_at: new Date().toISOString(), checkpoint_schema: SCHEMA_VERSIONS.checkpoint};
+      const dir = this.checkpointDir(projectId, missionId);
+      await this.write(path.join(dir, `${String(sequence).padStart(6, '0')}.json`), snapshot);
+      await this.write(this.missionFile(projectId, missionId), snapshot);
+      const files = (await fs.readdir(dir)).filter(name => /^\d{6}\.json$/.test(name)).sort();
+      await Promise.all(files.slice(0, -this.maxCheckpoints).map(name => fs.rm(path.join(dir, name), {force: true})));
+      return snapshot;
+    });
+  }
+
+  /** Structured checkpoint from a harness. Creates the mission when absent. */
+  async recordCheckpoint(projectId, missionId, fields = {}, {merge = 'append'} = {}) {
+    if (!await this.getMission(projectId, missionId)) await this.startMission(projectId, missionId, {goal: fields.goal || ''});
+    const state = await this.getMission(projectId, missionId);
+    return this.checkpoint(projectId, missionId, mergeCheckpointFields(state, fields, merge));
+  }
+
+  readJournal(projectId, missionId, limit = 50) {
+    return this.readLocked(this.projectDir(projectId), () => readJournal(this.journalFile(projectId, missionId), limit));
+  }
+
+  async recentEvents(projectId, missionId, limit = 50) {
+    return (await this.readJournal(projectId, missionId, limit)).events;
+  }
+
+  async contextBundleDetailed(projectId, missionId, maxChars = 120_000) {
+    const [project, mission, journal] = await Promise.all([this.getProject(projectId), this.getMission(projectId, missionId), this.readJournal(projectId, missionId, 30)]);
+    return buildContext({project, mission, events: journal.events, maxChars});
+  }
+
+  async contextBundle(projectId, missionId, maxChars = 120_000) {
+    return (await this.contextBundleDetailed(projectId, missionId, maxChars)).text;
+  }
+
+  getDailyUsage(day) {
+    return this.readLocked(this.usageDir(), () => readJson(path.join(this.usageDir(), `${day}.json`), null, {root: this.root}));
+  }
+
   /** Per-call usage: mission totals, bounded usage.jsonl, project totals and the shared daily file. */
-  async recordUsage(projectId,missionId,record){
-    await this.withLock(projectId, async()=>{
-      const dir=this.missionDir(projectId,missionId); const file=path.join(dir,'state.json'); const cur=await readJson(file,null);
-      if(!cur) throw new ToolError('mission_not_found','Mission not found');
-      await atomicJson(file,{...cur,usage:addUsage(cur.usage,record),updated_at:new Date().toISOString()});
-      await appendBoundedLine(path.join(dir,'usage.jsonl'),JSON.stringify(record),this.maxJournalBytes);
-      const projectFile=path.join(this.projectDir(projectId),'project.json'); const project=await readJson(projectFile,null);
-      if(project) await atomicJson(projectFile,{...project,usage_totals:addUsage(project.usage_totals,record)});
+  async recordUsage(projectId, missionId, record) {
+    await this.withLock(projectId, async () => {
+      const file = this.missionFile(projectId, missionId);
+      const mission = await this.readRecord(file, migrateMission);
+      if (!mission) throw new ToolError('mission_not_found', 'Mission not found');
+      await this.write(file, {...mission, usage: addUsage(mission.usage, record), updated_at: new Date().toISOString()});
+      await appendBoundedLine(path.join(this.missionDir(projectId, missionId), 'usage.jsonl'), JSON.stringify(record), this.maxJournalBytes, {durable: this.durable});
+      const project = await this.readRecord(this.projectFile(projectId), migrateProject);
+      if (project) await this.write(this.projectFile(projectId), {...project, usage_totals: addUsage(project.usage_totals, record)});
     });
     return this.recordSystemUsage(record);
   }
-  async recordSystemUsage(record){
-    const day=record.at.slice(0,10);
-    const dir=this.usageDir();
-    return this.local.run(dir,()=>this.lockAt(dir, async()=>{
-      const file=path.join(dir,`${day}.json`); const cur=await readJson(file,null);
-      const next={...addUsage(cur,record),schema:1,day}; await atomicJson(file,next); return next;
-    }));
+
+  recordSystemUsage(record) {
+    const dir = this.usageDir();
+    const day = record.at.slice(0, 10);
+    return this.lockAt(dir, async () => {
+      const file = path.join(dir, `${day}.json`);
+      const next = {...addUsage(await readJson(file, null, {root: this.root}), record), schema: SCHEMA_VERSIONS.usage, day};
+      await this.write(file, next);
+      return next;
+    });
   }
-  async usageRecords(projectId,missionId,limit=100){
-    try{return (await fs.readFile(path.join(this.missionDir(projectId,missionId),'usage.jsonl'),'utf8')).split('\n').filter(Boolean).slice(-limit).map(JSON.parse);}
-    catch(e){if(e.code==='ENOENT')return[];throw e;}
+
+  async usageRecords(projectId, missionId, limit = 100) {
+    const text = await readTextFile(path.join(this.missionDir(projectId, missionId), 'usage.jsonl'));
+    if (!text) return [];
+    return text.split('\n').filter(Boolean).flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } }).slice(-limit);
   }
-  providersDir(){ return path.join(this.root,'providers'); }
-  async getProviderStatus(){ const dir=this.providersDir(); return this.local.run(dir,()=>readJson(path.join(dir,'status.json'),{schema:1,providers:{}})); }
+
+  getProviderStatus() {
+    const dir = this.providersDir();
+    return this.readLocked(dir, () => readJson(path.join(dir, 'status.json'), {schema: 1, providers: {}}, {root: this.root}));
+  }
+
   /** Replace one provider's persisted catalog/verification status with update(previous). */
-  async updateProviderStatus(provider,update){
-    const dir=this.providersDir();
-    return this.local.run(dir,()=>this.lockAt(dir, async()=>{
-      const file=path.join(dir,'status.json'); const cur=await readJson(file,{schema:1,providers:{}});
-      const providers={...(cur.providers||{})}; const next=update(Object.hasOwn(providers,provider)?providers[provider]:{});
-      Object.defineProperty(providers,provider,{value:next,enumerable:true,writable:true,configurable:true});
-      await atomicJson(file,{schema:1,updated_at:new Date().toISOString(),providers}); return next;
-    }));
+  updateProviderStatus(provider, update) {
+    const dir = this.providersDir();
+    return this.lockAt(dir, async () => {
+      const file = path.join(dir, 'status.json');
+      const current = await readJson(file, {schema: 1, providers: {}}, {root: this.root});
+      const providers = {...(current.providers || {})};
+      const next = update(Object.hasOwn(providers, provider) ? providers[provider] : {});
+      Object.defineProperty(providers, provider, {value: next, enumerable: true, writable: true, configurable: true});
+      await this.write(file, {schema: 1, updated_at: new Date().toISOString(), providers});
+      return next;
+    });
   }
-  /** Structured checkpoint from a harness. Creates the mission when absent. */
-  async recordCheckpoint(projectId,missionId,fields={},{merge='append'}={}){
-    if(!await this.getMission(projectId,missionId)) await this.startMission(projectId,missionId,{goal:fields.goal||''});
-    const state=await this.getMission(projectId,missionId);
-    return this.checkpoint(projectId,missionId,mergeCheckpointFields(state,fields,merge));
-  }
-  async recentEvents(projectId,missionId,limit=50){
-    try{const lines=(await fs.readFile(path.join(this.missionDir(projectId,missionId),'journal.jsonl'),'utf8')).trim().split('\n').filter(Boolean);return lines.slice(-limit).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return[];throw e;}
-  }
-  async contextBundle(projectId,missionId,maxChars=120000){
-    const [project,mission,events]=await Promise.all([this.getProject(projectId),this.getMission(projectId,missionId),this.recentEvents(projectId,missionId,30)]);
-    const compactMission=mission?{...mission}:mission;
-    const outputs=compactMission?.agent_outputs||[];
-    if(compactMission){ compactMission.agent_outputs=outputs.slice(-8); if(compactMission.last_output&&compactMission.last_output.length>24000) compactMission.last_output=compactMission.last_output.slice(-24000); }
-    const bundle={project,mission:compactMission,recent_events:events}; let text=JSON.stringify(bundle,null,2);
-    if(text.length>maxChars) text='...[older context truncated]\n'+text.slice(-maxChars);
-    return text;
-  }
+
+  listProjects() { return listIds(path.join(this.root, 'projects')); }
+  listMissions(projectId) { return listIds(path.join(this.projectDir(projectId), 'missions')); }
 }
