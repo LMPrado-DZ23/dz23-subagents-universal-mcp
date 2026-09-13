@@ -14,6 +14,23 @@ async function ensureDir(p){ await fs.mkdir(p,{recursive:true,mode:0o700}); }
 async function atomicJson(file,obj){ await ensureDir(path.dirname(file)); const tmp=`${file}.${process.pid}.${Date.now()}.tmp`; await fs.writeFile(tmp,JSON.stringify(obj,null,2),{mode:0o600}); await fs.rename(tmp,file); }
 async function readJson(file,fallback){ try{return JSON.parse(await fs.readFile(file,'utf8'));}catch(e){if(e.code==='ENOENT')return fallback;throw e;} }
 
+const CHECKPOINT_LISTS=['acceptance_criteria','decisions','invariants','completed_tasks','active_tasks','blocked_tasks','next_tasks','known_failures','files_read','files_changed','artifacts'];
+const CHECKPOINT_SCALARS=['next_action','status','summary','goal'];
+function mergeList(current,incoming,merge){
+  if(merge==='replace')return [...incoming];
+  const out=[...(Array.isArray(current)?current:[])];const seen=new Set(out.map(x=>JSON.stringify(x)));
+  for(const item of incoming){const key=JSON.stringify(item);if(!seen.has(key)){seen.add(key);out.push(item);}}
+  return out;
+}
+/** Only provided fields change; omitted status keeps the current status. */
+export function mergeCheckpointFields(state,fields,merge='append'){
+  const patch={};
+  for(const key of CHECKPOINT_SCALARS)if(fields[key]!==undefined)patch[key]=fields[key];
+  for(const key of CHECKPOINT_LISTS)if(fields[key]!==undefined)patch[key]=mergeList(state?.[key],fields[key],merge);
+  if(fields.tests){const cur=state?.tests||{};patch.tests={...cur};for(const k of ['passed','failed','pending'])if(fields.tests[k])patch.tests[k]=mergeList(cur[k],fields.tests[k],merge);}
+  return patch;
+}
+
 export class ProjectMemory {
   constructor(root, options={}){
     this.root=root;
@@ -98,6 +115,12 @@ export class ProjectMemory {
       await Promise.all(checkpoints.slice(0,-this.maxCheckpoints).map(x=>fs.rm(path.join(dir,x),{force:true})));
       return cp;
     });
+  }
+  /** Structured checkpoint from a harness. Creates the mission when absent. */
+  async recordCheckpoint(projectId,missionId,fields={},{merge='append'}={}){
+    if(!await this.getMission(projectId,missionId)) await this.startMission(projectId,missionId,{goal:fields.goal||''});
+    const state=await this.getMission(projectId,missionId);
+    return this.checkpoint(projectId,missionId,mergeCheckpointFields(state,fields,merge));
   }
   async recentEvents(projectId,missionId,limit=50){
     try{const lines=(await fs.readFile(path.join(this.missionDir(projectId,missionId),'journal.jsonl'),'utf8')).trim().split('\n').filter(Boolean);return lines.slice(-limit).map(JSON.parse);}catch(e){if(e.code==='ENOENT')return[];throw e;}

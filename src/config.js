@@ -25,6 +25,9 @@ export function config(){
     maxJournalBytes:Math.max(65536,Math.min(4*1024*1024,intEnv('DZ23_MAX_JOURNAL_BYTES',1024*1024))),
     maxCheckpoints:Math.max(1,Math.min(16,intEnv('DZ23_MAX_CHECKPOINTS',8))),
     maxStdioFrameBytes:Math.max(65536,Math.min(2*1024*1024,intEnv('DZ23_MAX_STDIO_FRAME_BYTES',512*1024))),
+    maxPromptChars:Math.max(1000,Math.min(200000,intEnv('DZ23_MAX_PROMPT_CHARS',32000))),
+    maxGoalChars:Math.max(500,Math.min(64000,intEnv('DZ23_MAX_GOAL_CHARS',8000))),
+    toolArgumentErrors:['auto','jsonrpc','tool_result'].includes(process.env.DZ23_TOOL_ARGUMENT_ERRORS)?process.env.DZ23_TOOL_ARGUMENT_ERRORS:'auto',
     allowPaid:String(process.env.DZ23_ALLOW_PAID||'false').toLowerCase()==='true',
     rotation:(process.env.DZ23_ROTATION||'').split(',').map(s=>s.trim()).filter(Boolean)
   };

@@ -52,7 +52,10 @@ function runMcp(f, overrides = {}) {
   assert.equal(responses.length, 3);
   for (const response of responses) assert.equal(response.error, undefined);
   assert.equal(responses.find(r => r.id === 1).result.serverInfo.version, version);
-  return responses.find(r => r.id === 2).result.structuredContent;
+  // v2.3.0: structuredContent is always an object; array results are wrapped as {items}.
+  const inventory = responses.find(r => r.id === 2).result;
+  assert.deepEqual(JSON.parse(inventory.content[0].text), inventory.structuredContent.items);
+  return inventory.structuredContent.items;
 }
 
 test('installation loads the package .env from an unrelated working directory', t => {

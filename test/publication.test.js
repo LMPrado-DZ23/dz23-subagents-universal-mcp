@@ -111,8 +111,9 @@ test('HTTP auth, origin, host, notifications, malformed JSON and methods',async 
   assert.equal((await fetch(`${base}/mcp`,{method:'POST',headers,body:'[]'})).status,400);
   const response=await fetch(`${base}/mcp`,{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})});
   assert.equal(response.status,202);assert.equal(await response.text(),'');
-  const init=await fetch(`${base}/mcp`,{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'future-unsupported'}})});
-  assert.equal((await init.json()).result.protocolVersion,'2025-06-18');
+  // v2.3.0: dated but unsupported revisions receive the latest supported version as counter-offer.
+  const init=await fetch(`${base}/mcp`,{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2099-01-01'}})});
+  assert.equal((await init.json()).result.protocolVersion,'2025-11-25');
 });
 test('raw provider error bodies are not returned or persisted as messages',async()=>{
   const original=globalThis.fetch;const echo='sensitive-placeholder-for-test';

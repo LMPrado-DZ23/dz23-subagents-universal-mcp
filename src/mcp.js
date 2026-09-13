@@ -1,15 +1,149 @@
-const tools=[
- ['list_models','List configured routing targets, tiers and declared capabilities',{type:'object',properties:{}}],
- ['provider_inventory','Inventory all registered providers without exposing secrets',{type:'object',properties:{}}],
- ['discover_models','Discover models from provider /models endpoints',{type:'object',properties:{provider:{type:'string'},refresh:{type:'boolean'}}}],
- ['health_check','Probe configured providers/models in parallel',{type:'object',properties:{}}],
- ['project_init','Create/update canonical shared project memory',{type:'object',required:['project_id'],properties:{project_id:{type:'string'},workspace:{type:'string'},repository:{type:'string'},branch:{type:'string'}}}],
- ['mission_status','Read shared mission state and recent journal events',{type:'object',required:['project_id','mission_id'],properties:{project_id:{type:'string'},mission_id:{type:'string'}}}],
- ['memory_checkpoint','Persist a handoff checkpoint for another harness/agent',{type:'object',required:['project_id','mission_id'],properties:{project_id:{type:'string'},mission_id:{type:'string'},next_action:{type:'string'},status:{type:'string'}}}],
- ['delegate','Delegate one advisory task with automatic target failover and bounded context continuity',{type:'object',required:['prompt'],properties:{project_id:{type:'string'},mission_id:{type:'string'},goal:{type:'string'},prompt:{type:'string'},role:{type:'string',enum:['worker','architect','backend','frontend','security','qa','devops','reviewer']},target:{type:'string'}}}],
- ['consensus','Ask multiple independent models/reviewers',{type:'object',required:['prompt'],properties:{project_id:{type:'string'},mission_id:{type:'string'},prompt:{type:'string'},models:{type:'integer',minimum:2,maximum:5}}}],
- ['swarm_run','Run up to seven parallel advisory specialists; multiple workers may share a provider',{type:'object',required:['goal'],properties:{project_id:{type:'string'},mission_id:{type:'string'},goal:{type:'string'},roles:{type:'array',items:{type:'string',enum:['architect','backend','frontend','security','qa','devops','reviewer']}},max_agents:{type:'integer',minimum:1,maximum:7}}}]
-].map(([name,description,inputSchema])=>({name,description,inputSchema}));
-function result(v){return {content:[{type:'text',text:JSON.stringify(v,null,2)}],structuredContent:v};}
-export function createMcpHandler(router,memory){return async msg=>{if(msg.method==='initialize')return {protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'dz23-subagents-universal',version:'2.2.5'}};if(msg.method?.startsWith('notifications/'))return null;if(msg.method==='ping')return {};if(msg.method==='tools/list')return {tools};if(msg.method==='tools/call'){const a=msg.params?.arguments||{};switch(msg.params?.name){case'list_models':return result(router.listModels());case'provider_inventory':return result(router.inventory());case'discover_models':return result(await router.discover(a));case'health_check':return result(await router.healthCheck());case'project_init':return result(await memory.initProject(a.project_id,{workspace:a.workspace||'',repository:a.repository||'',branch:a.branch||''}));case'mission_status':return result({state:await memory.getMission(a.project_id,a.mission_id),recent_events:await memory.recentEvents(a.project_id,a.mission_id,40)});case'memory_checkpoint':return result(await memory.checkpoint(a.project_id,a.mission_id,{next_action:a.next_action||'',status:a.status||'active'}));case'delegate':return result(await router.delegate(a));case'consensus':return result(await router.consensus(a));case'swarm_run':return result(await router.swarmRun(a));default:throw new Error(`Unknown tool: ${msg.params?.name}`);}}throw new Error(`Unsupported MCP method: ${msg.method}`);};}
-export function toolDefinitions(){return tools;}
+import {
+  SERVER_NAME, SERVER_VERSION, SERVER_DESCRIPTION, SUPPORTED_PROTOCOL_VERSIONS, LATEST_PROTOCOL_VERSION,
+  VALIDATION_AS_TOOL_ERROR_VERSIONS, RPC_ERRORS
+} from './constants.js';
+import {validate, ValidationError, isPlainObject} from './schema.js';
+import {buildTools, toolLimits, TOOL_POLICIES} from './tools.js';
+import {RpcError, ToolError, ForbiddenError, safeText} from './errors.js';
+
+const DATE_VERSION = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Echo the requested version when supported, counter-offer the latest for other dated revisions. */
+export function negotiateProtocolVersion(requested) {
+  if (typeof requested !== 'string' || !DATE_VERSION.test(requested)) {
+    throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Unsupported protocol version', {
+      supported: [...SUPPORTED_PROTOCOL_VERSIONS],
+      requested: typeof requested === 'string' ? safeText(requested, 64) : null
+    });
+  }
+  return SUPPORTED_PROTOCOL_VERSIONS.includes(requested) ? requested : LATEST_PROTOCOL_VERSION;
+}
+
+export function toolDefinitions(cfg = {}) {
+  return buildTools(toolLimits(cfg));
+}
+
+function successResult(value) {
+  return {
+    content: [{type: 'text', text: JSON.stringify(value, null, 2)}],
+    structuredContent: isPlainObject(value) ? value : {items: value}
+  };
+}
+
+export function toolErrorPayload(error, ctx = {}) {
+  return {error: {
+    code: error.code || 'tool_error',
+    message: safeText(error.message, 500),
+    ...(ctx.requestId ? {request_id: ctx.requestId} : {}),
+    ...(error.details !== undefined ? {details: error.details} : {})
+  }};
+}
+
+function errorResult(error, ctx) {
+  const payload = toolErrorPayload(error, ctx);
+  return {content: [{type: 'text', text: JSON.stringify(payload, null, 2)}], structuredContent: payload, isError: true};
+}
+
+function argumentErrorsAsToolResult(mode, ctx) {
+  if (mode === 'tool_result') return true;
+  if (mode === 'jsonrpc') return false;
+  const version = ctx.session?.protocolVersion || ctx.protocolVersion;
+  return VALIDATION_AS_TOOL_ERROR_VERSIONS.has(version);
+}
+
+function authorize(ctx, policy) {
+  if (!ctx.scopes) return;
+  const missing = policy.scopes.filter(scope => !ctx.scopes.has(scope));
+  if (missing.length) throw new ForbiddenError(policy.scopes);
+}
+
+function toolRunner(router, memory) {
+  const withRequest = (args, ctx) => ({...args, request_id: ctx.requestId});
+  return {
+    list_models: () => router.listModels(),
+    provider_inventory: () => router.inventory(),
+    discover_models: args => router.discover(args),
+    health_check: (_args, ctx) => router.healthCheck({request_id: ctx.requestId}),
+    project_init: ({project_id, ...fields}) => memory.initProject(project_id, fields),
+    mission_status: async ({project_id, mission_id, events_limit}) => ({
+      state: await memory.getMission(project_id, mission_id),
+      recent_events: await memory.recentEvents(project_id, mission_id, events_limit)
+    }),
+    memory_checkpoint: ({project_id, mission_id, merge, ...fields}) => memory.recordCheckpoint(project_id, mission_id, fields, {merge}),
+    delegate: (args, ctx) => router.delegate(withRequest(args, ctx)),
+    consensus: (args, ctx) => router.consensus(withRequest(args, ctx)),
+    swarm_run: (args, ctx) => router.swarmRun(withRequest(args, ctx))
+  };
+}
+
+/**
+ * MCP method handler shared by stdio and HTTP. Returns the JSON-RPC `result`,
+ * `null` for notifications, or throws RpcError / ForbiddenError / RateLimitError.
+ */
+export function createMcpHandler(router, memory, options = {}) {
+  const tools = buildTools(toolLimits(options.limits || router?.cfg || {}));
+  const byName = new Map(tools.map(tool => [tool.name, tool]));
+  const runners = toolRunner(router, memory);
+  const argumentErrorMode = options.argumentErrors || router?.cfg?.toolArgumentErrors || 'auto';
+
+  /** Validates, authorizes, rate-limits and executes one tool. Used by MCP and REST. */
+  async function executeTool(name, rawArgs, ctx = {}) {
+    const tool = typeof name === 'string' ? byName.get(name) : undefined;
+    if (!tool) throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Unknown tool', {tool: safeText(name, 64).replace(/[^A-Za-z0-9_.-]/g, '?')});
+    let args;
+    try {
+      if (rawArgs !== undefined && !isPlainObject(rawArgs)) throw new ValidationError('arguments', 'must be an object');
+      args = validate(tool.inputSchema, rawArgs ?? {});
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Invalid tool arguments', {field: error.field, reason: error.reason});
+    }
+    const policy = TOOL_POLICIES[tool.name];
+    authorize(ctx, policy);
+    const release = ctx.beforeToolCall ? await ctx.beforeToolCall(tool.name, policy) : undefined;
+    try {
+      return {ok: true, value: await runners[tool.name](args, ctx)};
+    } catch (error) {
+      if (error instanceof ToolError) return {ok: false, error};
+      throw error;
+    } finally {
+      if (typeof release === 'function') release();
+    }
+  }
+
+  async function callTool(params, ctx) {
+    if (!isPlainObject(params)) throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Invalid params', {field: 'params', reason: 'must be an object'});
+    if (typeof params.name !== 'string' || !params.name) throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Invalid params', {field: 'name', reason: 'must be a non-empty string'});
+    try {
+      const outcome = await executeTool(params.name, params.arguments, ctx);
+      return outcome.ok ? successResult(outcome.value) : errorResult(outcome.error, ctx);
+    } catch (error) {
+      const invalidArguments = error instanceof RpcError && error.message === 'Invalid tool arguments';
+      if (invalidArguments && argumentErrorsAsToolResult(argumentErrorMode, ctx)) {
+        return errorResult(new ToolError('invalid_arguments', 'Invalid tool arguments', error.data), ctx);
+      }
+      throw error;
+    }
+  }
+
+  async function handler(msg, ctx = {}) {
+    const method = msg?.method;
+    if (method === 'initialize') {
+      const params = isPlainObject(msg.params) ? msg.params : {};
+      const protocolVersion = negotiateProtocolVersion(params.protocolVersion);
+      if (ctx.session) ctx.session.protocolVersion = protocolVersion;
+      const serverInfo = {name: SERVER_NAME, version: SERVER_VERSION};
+      if (protocolVersion === '2025-11-25') serverInfo.description = SERVER_DESCRIPTION;
+      return {protocolVersion, capabilities: {tools: {listChanged: false}}, serverInfo};
+    }
+    if (typeof method === 'string' && method.startsWith('notifications/')) return null;
+    if (method === 'ping') return {};
+    if (method === 'tools/list') return {tools};
+    if (method === 'tools/call') return callTool(msg.params, ctx);
+    throw new RpcError(RPC_ERRORS.METHOD_NOT_FOUND, 'Method not found', {method: safeText(method, 64)});
+  }
+
+  handler.tools = tools;
+  handler.executeTool = executeTool;
+  return handler;
+}

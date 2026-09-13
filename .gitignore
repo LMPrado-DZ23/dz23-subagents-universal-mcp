@@ -22,3 +22,7 @@ coverage/
 *.mcpb
 .DS_Store
 Thumbs.db
+
+# Local autonomous-mission state and audits (never published)
+.agent/
+audit/
