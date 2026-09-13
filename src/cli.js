@@ -168,13 +168,24 @@ async function health(opts, io) {
   return results.length && results.every(result => result.ok) ? EXIT.OK : EXIT.PROBLEMS;
 }
 
+/** A wrong-case id on a case-insensitive filesystem is a usage error, never reported as corrupt memory. */
+async function exactIds(memory, projectId, missionId) {
+  try {
+    await memory.checkIds(projectId, missionId);
+  } catch (error) {
+    if (error instanceof ToolError && error.code === 'invalid_request') throw new UsageError(error.message);
+    throw error;
+  }
+}
+
 async function missions(positionals, opts, io) {
   const [action, projectId, missionId] = positionals;
   if (action !== 'list' && action !== 'show') throw new UsageError('missions requires list or show');
   if (action === 'show' && (!projectId || !missionId)) throw new UsageError('missions show requires <project_id> <mission_id>');
   const {memory} = services(config(io.env));
   if (action === 'list') {
-    const projects = opts.project ? [validId(opts.project, 'project_id')] : await memory.listProjects();
+    if (opts.project) await exactIds(memory, validId(opts.project, 'project_id'));
+    const projects = opts.project ? [opts.project] : await memory.listProjects();
     const rows = [];
     for (const project of projects) {
       for (const mission of await memory.listMissions(project)) {
@@ -192,6 +203,7 @@ async function missions(positionals, opts, io) {
   }
   validId(projectId, 'project_id');
   validId(missionId, 'mission_id');
+  await exactIds(memory, projectId, missionId);
   let state;
   try { state = await memory.getMission(projectId, missionId); } catch (error) {
     if (!(error instanceof ToolError)) throw error;
@@ -210,12 +222,13 @@ async function memoryCommand(positionals, opts, io) {
   if (positionals[0] !== 'repair') throw new UsageError('memory requires the repair action');
   if (opts.apply && !opts.yes) throw new UsageError('--apply changes the state directory; confirm with --yes');
   const {memory} = services(config(io.env));
-  const report = await inspectMemory(memory, {projectId: opts.project ? validId(opts.project, 'project_id') : undefined});
+  if (opts.project) await exactIds(memory, validId(opts.project, 'project_id'));
+  const report = await inspectMemory(memory, {projectId: opts.project || undefined});
   const result = await repairMemory(memory, report, {apply: Boolean(opts.apply)});
   const output = {state_dir_exists: report.state_dir_exists, projects_scanned: report.projects_scanned, missions_scanned: report.missions_scanned, applied: result.applied, issues: report.issues, actions: result.actions};
   print(io, output, opts.json, r => [`Scanned ${r.projects_scanned} project(s), ${r.missions_scanned} mission(s); ${r.issues.length} issue(s).`,
     ...r.issues.map(i => `  ${i.repairable ? 'REPAIRABLE' : 'MANUAL    '}  ${i.type}  ${i.file || i.lock || `${i.project || ''}${i.mission ? `/${i.mission}` : ''}`}${i.action ? `  (${i.action})` : ''}`),
-    ...r.actions.map(a => `  ACTION  ${a.type}: ${a.status}`), r.applied ? 'Repairs applied.' : 'Dry run only. Re-run with --apply --yes to repair.'].join('\n'));
+    ...r.actions.map(a => `  ACTION  ${a.type}: ${a.status}`), r.applied ? (r.actions.some(a => ['removed', 'restored', 'closed'].includes(a.status)) ? 'Repairs applied.' : 'No repairs applied.') : 'Dry run only. Re-run with --apply --yes to repair.'].join('\n'));
   const blocking = report.issues.some(issue => !issue.repairable && ['corrupt_project', 'corrupt_mission_state'].includes(issue.type));
   if (!result.applied) return blocking || report.issues.some(issue => issue.repairable) ? EXIT.PROBLEMS : EXIT.OK;
   return blocking || result.actions.some(action => action.status === 'skipped') ? EXIT.PROBLEMS : EXIT.OK;

@@ -118,7 +118,7 @@ export function config(env = process.env) {
   const scoped = loadScopedTokens(env);
   for (const message of [...auth.warnings, ...scoped.warnings]) issues.push({level: 'warn', variable: 'auth', message});
   if (auth.token && auth.token.length < 32 && flag(env, 'DZ23_ALLOW_HTTP', false, [])) {
-    issues.push({level: 'error', variable: String(auth.source).startsWith('file:') ? 'DZ23_MCP_TOKEN_FILE' : 'DZ23_MCP_TOKEN', message: 'HTTP bearer tokens must have at least 32 characters'});
+    issues.push({level: 'warn', variable: String(auth.source).startsWith('file:') ? 'DZ23_MCP_TOKEN_FILE' : 'DZ23_MCP_TOKEN', message: 'HTTP bearer tokens must have at least 32 characters; --http refuses to start'});
   }
   if (scoped.mode === 'scoped' && auth.token) {
     issues.push({level: 'warn', variable: 'DZ23_MCP_TOKEN', message: 'the primary token keeps every scope in scoped mode; remove it to rely only on scoped tokens'});

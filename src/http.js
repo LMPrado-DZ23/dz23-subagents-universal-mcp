@@ -11,6 +11,7 @@ const HTTP_DEFAULTS = Object.freeze({maxBodyBytes: 1024 * 1024, bodyTimeoutMs: 1
 const RATE_DEFAULTS = Object.freeze({enabled: true, windowMs: 60_000, points: 120, toolPoints: 60, maxConcurrent: 4});
 const REST_TOOLS = {'/api/delegate': 'delegate', '/api/consensus': 'consensus', '/api/swarm': 'swarm_run', '/api/health': 'health_check'};
 const SAFE_FETCH_SITES = new Set(['same-origin', 'none']);
+const FIRST_REQUEST = Symbol('dz23.firstRequest');
 const BODY_ERRORS = {request_too_large: 'Request body is too large', request_timeout: 'Request body was not received in time', request_aborted: 'Request body was aborted'};
 
 /** Returns a refusal reason when binding would expose HTTP without adequate authentication. */
@@ -91,7 +92,9 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   }
 
   function fail(res, status, code, message, ctx, details, extra = {}) {
-    return send(res, status, errorBody(code, message, ctx, details), {...(ctx?.requestId ? {'x-request-id': ctx.requestId} : {}), ...extra});
+    // Unauthenticated failures close the connection: only authenticated clients keep idle keep-alive sockets.
+    const close = ctx?.scopes ? {} : {connection: 'close'};
+    return send(res, status, errorBody(code, message, ctx, details), {...close, ...(ctx?.requestId ? {'x-request-id': ctx.requestId} : {}), ...extra});
   }
 
   function rateLimited(res, error, ctx) {
@@ -220,6 +223,7 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   }
 
   const server = http.createServer({connectionsCheckingInterval: Math.min(limits.headersTimeoutMs, 2000)}, (req, res) => {
+    req.socket[FIRST_REQUEST] = true;
     const ctx = {transport: 'http', requestId: acceptRequestId(req.headers['x-request-id']), identity: 'unauthenticated'};
     handle(req, res, ctx).catch(error => {
       if (res.headersSent) return res.destroy();
@@ -233,13 +237,12 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   server.headersTimeout = limits.headersTimeoutMs;
   server.requestTimeout = limits.headersTimeoutMs + limits.bodyTimeoutMs + 1000;
   server.timeout = limits.socketTimeoutMs;
-  // A connection that never sends a byte is closed after headersTimeoutMs instead of holding a slot until the socket timeout.
+  // A connection that has not delivered complete request headers within headersTimeoutMs is closed, so silence
+  // or a byte trickle cannot hold a connection slot until the socket timeout.
   server.on('connection', socket => {
-    const idle = setTimeout(() => { if (!socket.bytesRead) socket.destroy(); }, limits.headersTimeoutMs);
+    const idle = setTimeout(() => { if (!socket[FIRST_REQUEST]) socket.destroy(); }, limits.headersTimeoutMs);
     idle.unref();
-    const clear = () => clearTimeout(idle);
-    socket.once('data', clear);
-    socket.once('close', clear);
+    socket.once('close', () => clearTimeout(idle));
   });
   server.keepAliveTimeout = 5000;
 

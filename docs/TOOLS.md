@@ -24,8 +24,9 @@ organiza memória e nunca autentica ou autoriza.
 
 `delegate`, `consensus` e `swarm_run` aceitam IDs opcionais: sem `project_id` usam o projeto
 `default`; sem `mission_id` geram um UUID, devolvido no resultado. IDs que diferem de um existente
-apenas por maiúsculas/minúsculas são recusados (`invalid_request`), porque Windows e macOS os
-tratariam como a mesma pasta.
+apenas por maiúsculas/minúsculas são recusados (`invalid_request`) quando o diretório de estado fica
+em sistema de arquivos que não diferencia maiúsculas (Windows, macOS), porque ali seriam a mesma
+pasta. Em sistemas que diferenciam (Linux), esses IDs continuam sendo registros distintos.
 
 ## Argumentos e erros
 
@@ -122,8 +123,9 @@ sozinho, não faz retry nem failover, respeita a política de custo e grava
 
 A categoria de custo é declarada por provider, não por modelo. Por isso, sem `DZ23_ROTATION`, um
 `target` explícito só usa o modelo padrão do provider, a menos que `DZ23_ALLOW_PAID=true`. A exceção
-são providers locais cujo endereço é loopback ou de rede privada (um `CUSTOM_BASE_URL` público não
-conta); um gateway local que repassa para nuvens pagas deve ser usado com `DZ23_ROTATION`. Com
+são providers locais cujo endereço é loopback ou de rede privada: IPs de loopback e privados,
+`localhost`, `host.docker.internal`, nomes sem ponto (como `ollama` num compose) e nomes `.local`. Um
+`CUSTOM_BASE_URL` público não conta; um gateway local que repassa para nuvens pagas deve ser usado com `DZ23_ROTATION`. Com
 rotação, `delegate`, `consensus` e `swarm_run` só aceitam alvos da rotação. `verify_model` serve para
 testar um modelo antes de incluí-lo: aceita alvos fora da rotação, mas nesse caso aplica a regra do
 modelo padrão e recusa com `details.reason: model_not_allowed`.

@@ -101,6 +101,7 @@ test('checkpoint lists and total state size are bounded; the tool response is a 
 
 test('identifiers differing only by letter case are refused', async t => {
   const memory = new ProjectMemory(await tempDir(t));
+  memory.caseProbe = Promise.resolve(true); // exercise the case-insensitive rules on every platform
   await memory.initProject('CaseProj');
   await assert.rejects(memory.initProject('caseproj'), error => error.code === 'invalid_request' && error.details === undefined);
   await memory.startMission('CaseProj', 'Mission1', {goal: 'g'});

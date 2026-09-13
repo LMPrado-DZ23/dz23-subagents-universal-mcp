@@ -68,9 +68,10 @@ Buckets em memória por processo, recarregados continuamente na janela
   `billable:10` (health_check, verify_model), `expensive:15` (consensus), `very_expensive:30` (swarm_run);
 - só tentativas com token inválido consomem pontos do endereço remoto (peso `moderate`); esgotado o
   bucket, novas tentativas inválidas recebem 429. Um token válido nunca é bloqueado pelas falhas de
-  outro cliente no mesmo endereço. Com HTTP habilitado, `DZ23_MCP_TOKEN` precisa ter 32+ caracteres
-  (senão o servidor não inicia), o que torna inviável adivinhar o token.
-- conexões que não enviam nenhum byte são fechadas após `DZ23_HTTP_HEADERS_TIMEOUT_MS` (10 s). Não há
+  outro cliente no mesmo endereço. Com `--http`, `DZ23_MCP_TOKEN` precisa ter 32+ caracteres
+  (senão o servidor HTTP não inicia; em stdio é só um aviso), o que torna inviável adivinhar o token.
+- conexões que não entregam os headers da primeira requisição em `DZ23_HTTP_HEADERS_TIMEOUT_MS` (10 s)
+  são fechadas, e respostas a requisições não autenticadas encerram a conexão. Não há
   limite de conexões por endereço: fora de loopback, aplique esse limite no proxy reverso.
 
 Excesso retorna 429 com `Retry-After` antes de qualquer chamada a provider. A identidade é
@@ -157,8 +158,10 @@ Mensagens stdio são processadas uma por vez, na ordem de chegada: uma chamada l
 ## Referência de variáveis
 
 Inteiros fora da faixa são ajustados ao limite com aviso; valores não numéricos e booleanos diferentes
-de `true`/`false` são erro. Variáveis de orçamento, rate limit, memória e autenticação estão nas seções
-acima; a lista completa com valores de exemplo fica em `.env.example`.
+de `true`/`false` são erro. Esta tabela cobre as variáveis sem outra documentação. Orçamento, rate
+limit e limites de memória estão nas seções acima; estado, HTTP, autenticação e escopos em
+`docs/INSTALL_ANY_HARNESS.md` e `docs/SECURITY_AND_SECRETS.md`; limites de ferramentas e fila em
+`docs/TOOLS.md`. Todas aparecem com valor de exemplo em `.env.example`.
 
 | Variável | Padrão | Faixa | Efeito |
 | --- | --- | --- | --- |
@@ -166,7 +169,7 @@ acima; a lista completa com valores de exemplo fica em `.env.example`.
 | `DZ23_HTTP_PORT` | `8787` | 0–65535 | Porta do HTTP |
 | `DZ23_HTTP_MAX_BODY_BYTES` | `1048576` | 16 384–8 388 608 | Corpo máximo (413) |
 | `DZ23_HTTP_BODY_TIMEOUT_MS` | `10000` | 500–120 000 | Tempo para receber o corpo (408) |
-| `DZ23_HTTP_HEADERS_TIMEOUT_MS` | `10000` | 1000–60 000 | Tempo para os headers; também fecha conexões que não enviam nenhum byte |
+| `DZ23_HTTP_HEADERS_TIMEOUT_MS` | `10000` | 1000–60 000 | Tempo para os headers; também fecha conexões que não completam a primeira requisição |
 | `DZ23_HTTP_MAX_INFLIGHT` | `32` | 1–1024 | Requisições simultâneas (503) |
 | `DZ23_HTTP_MAX_CONNECTIONS` | `128` | 1–10 000 | Conexões TCP simultâneas |
 | `DZ23_HTTP_SOCKET_TIMEOUT_MS` | `900000` | 10 000–3 600 000 | Inatividade máxima de uma conexão já em uso |

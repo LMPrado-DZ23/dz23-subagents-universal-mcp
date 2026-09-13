@@ -10,8 +10,9 @@ export function forbiddenPath(name) {
   return parts.some(part => ['.git','node_modules','secrets','state','.dz23-state','.dz23-subagents','generated'].includes(part)) ||
     parts.some(part => /^\.env(?:\..*)?$/.test(part) && part !== '.env.example') ||
     parts.some(part => /^(?:credentials?|secrets?|service[-_]?account)(?:[._-].*)?\.(?:json|ya?ml)$/i.test(part) ||
-      /(?:^|[._-])(?:tokens?|key|auth)\.(?:json|txt)$/i.test(part) || /^(?:id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.netrc|\.pypirc|\.git-credentials)$/i.test(part)) ||
-    /\.(?:pem|key|p12|pfx|log|tmp|bak|zip|mcpb)$/i.test(name);
+      /(?:^|[._-])(?:tokens?|keys?|api[-_]?keys?|auth)\.(?:json|txt|ya?ml)$/i.test(part) ||
+      /^(?:id_(?:rsa|dsa|ecdsa|ed25519)|\.npmrc|\.netrc|\.pypirc|\.pgpass|\.htpasswd|\.git-credentials|kubeconfig)$/i.test(part)) ||
+    /\.(?:pem|key|p12|pfx|jks|keystore|log|tmp|bak|zip|mcpb)$/i.test(name);
 }
 // Heuristic release guard shared with runtime log redaction; not a complete DLP test.
 import {secretDetected} from '../src/redact.js';

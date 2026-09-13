@@ -86,6 +86,9 @@ dado não confiável e pode ser truncado; não há recuperação semântica ou v
   arbitrários não façam a memória crescer sem limite.
 - Não há cota de disco nem limite de missões por projeto: um token com `memory:write` pode criar muitas
   missões. Use cota no volume de estado e escopos restritos.
+- Um provider local (`custom`, `lmstudio`, `vllm`) apontado para um endereço público continua elegível
+  com o modelo configurado sem `DZ23_ALLOW_PAID`, porque a categoria de custo vem do tipo do provider.
+  Não aponte providers locais para APIs pagas.
 
 Não prometer: conformidade MCP completa, compatibilidade com todos os hosts, uso gratuito,
 conclusão autônoma de projetos, operação 24/7 sem supervisão ou qualidade medida por benchmarks.

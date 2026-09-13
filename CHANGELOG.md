@@ -42,8 +42,8 @@ numa candidata interna, nunca publicada.
   de iniciar, com código 78.
 - Argumentos que não sejam `--stdio`/`--http` são comandos da CLI; comando desconhecido sai com 2.
 - `swarm_run` sem `max_agents` usa no máximo `DZ23_MAX_CONCURRENCY` workers.
-- `token hash` recusa tokens com menos de 32 caracteres. Com HTTP habilitado, `DZ23_MCP_TOKEN` com
-  menos de 32 caracteres impede a inicialização (código 78).
+- `token hash` recusa tokens com menos de 32 caracteres. Com `--http`, `DZ23_MCP_TOKEN` com
+  menos de 32 caracteres impede a inicialização (código 78); em stdio gera apenas aviso.
 
 ### MCP e JSON-RPC
 - Validador de JSON Schema sem dependências; keywords não suportadas são recusadas no registro.
@@ -121,6 +121,16 @@ numa candidata interna, nunca publicada.
   hostname; o handoff após uma chamada já paga não falha por limite de tamanho; `memory_checkpoint`
   informa `truncated_lists`; `startMission` não sobrescreve missão criada em paralelo; um processo
   só remove o próprio lock; erros HTTP inesperados trazem `request_id`.
+- Quarta rodada: falha transitória ao ler `owner.json` na liberação não deixa mais o lock preso até o
+  processo reiniciar (escrita de heartbeat pendente é aguardada e a leitura é repetida); a checagem de
+  maiúsculas/minúsculas só vale em sistemas de arquivos que não as diferenciam, então IDs distintos já
+  existentes em Linux continuam acessíveis; na CLI, ID com maiúsculas/minúsculas trocadas é erro de uso
+  (código 2) em vez de parecer memória corrompida; `memory repair --apply` informa "No repairs applied."
+  quando nada mudou; token HTTP curto impede apenas `--http`; conexões que não completam os headers da
+  primeira requisição são fechadas e respostas não autenticadas encerram a conexão; o endereço privado
+  é analisado como IP de verdade (nomes como `10.0.0.1.evil.com` não contam); a checagem de maiúsculas
+  só lista o diretório para IDs ainda não vistos; o guard de publicação cobre `apikey*`, `.pgpass`,
+  `.htpasswd`, `kubeconfig` e keystores Java.
 - Terceira rodada: missão que já atingiu `DZ23_MAX_STATE_BYTES` é recusada antes de qualquer chamada
   paga; conexões HTTP silenciosas são fechadas após o timeout de headers; erro de provider, rotação com
   provider desconhecido e HTTP inseguro fazem o servidor sair com 78 em vez de iniciar ou mostrar stack

@@ -111,6 +111,25 @@ export async function removeStaleLock(lockPath, inspection) {
   return true;
 }
 
+/**
+ * Whether the lock directory still belongs to this holder. The lock is left alone only when owner.json was
+ * read successfully and names someone else, or when our metadata vanished (the directory was replaced).
+ * Transient read errors are retried; an unreadable owner file is treated as ours, because leaving our own
+ * lock behind would block the project until this process exits.
+ */
+async function ownsLock(lockPath, owner, ownerWritten) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const current = JSON.parse(await fs.readFile(path.join(lockPath, OWNER_FILE), 'utf8'));
+      return current?.pid === owner.pid && current?.created_at === owner.created_at;
+    } catch (error) {
+      if (error?.code === 'ENOENT') return !ownerWritten;
+      if (!TRANSIENT.has(error?.code) || attempt >= 5) return true;
+      await sleep(20 + Math.random() * 30);
+    }
+  }
+}
+
 /** Cross-process lock using an exclusive directory plus owner metadata refreshed by a heartbeat. */
 export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000, onRecovered} = {}) {
   await ensureDir(dir);
@@ -154,17 +173,15 @@ export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000
     }
   };
   await writeOwner();
-  const heartbeat = setInterval(() => { owner.updated_at = new Date().toISOString(); writeOwner(); }, Math.max(1000, Math.floor(staleMs / 3)));
+  let pendingOwnerWrite = Promise.resolve();
+  const heartbeat = setInterval(() => { owner.updated_at = new Date().toISOString(); pendingOwnerWrite = writeOwner(); }, Math.max(1000, Math.floor(staleMs / 3)));
   heartbeat.unref();
   try {
     return await fn();
   } finally {
     clearInterval(heartbeat);
-    // Release only our own lock: if it was parked meanwhile and another process now holds .lock, leave it.
-    let current = null;
-    try { current = JSON.parse(await fs.readFile(path.join(lockPath, OWNER_FILE), 'utf8')); } catch { current = null; }
-    // Without owner metadata the directory is ours only if our own owner write never succeeded.
-    const ours = current ? current.pid === owner.pid && current.created_at === owner.created_at : !ownerWritten;
+    await pendingOwnerWrite; // never write owner.json into a lock directory after deciding to release it
+    const ours = await ownsLock(lockPath, owner, ownerWritten);
     for (let i = 0; ours && i < 20; i++) {
       try {
         await fs.rm(lockPath, {recursive: true, force: true});

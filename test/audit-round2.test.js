@@ -43,6 +43,7 @@ test('a full delegation queue fails the call without putting the target into coo
 
 test('case-insensitive aliases are refused on every memory read and write path', async t => {
   const memory = new ProjectMemory(await tempDir(t));
+  memory.caseProbe = Promise.resolve(true); // exercise the case-insensitive rules on every platform
   await memory.recordCheckpoint('proj', 'fix-login', {decisions: ['A'], goal: 'original'});
   await assert.rejects(memory.recordCheckpoint('proj', 'Fix-Login', {decisions: ['B'], goal: 'other'}), invalid);
   await assert.rejects(memory.recordCheckpoint('PROJ', 'fix-login', {decisions: ['B']}), invalid);
@@ -109,7 +110,9 @@ test('startMission never overwrites a mission created in the meantime', async t 
 test('HTTP-enabled configuration refuses bearer tokens shorter than 32 characters', async t => {
   const dir = await tempDir(t);
   const errors = cfg => cfg.configIssues.filter(issue => issue.level === 'error').map(issue => issue.variable);
-  assert.ok(errors(config({DZ23_STATE_DIR: dir, DZ23_ALLOW_HTTP: 'true', DZ23_MCP_TOKEN: 'short-token'})).includes('DZ23_MCP_TOKEN'));
+  const shortToken = config({DZ23_STATE_DIR: dir, DZ23_ALLOW_HTTP: 'true', DZ23_MCP_TOKEN: 'short-token'}).configIssues;
+  assert.ok(shortToken.some(issue => issue.level === 'warn' && issue.variable === 'DZ23_MCP_TOKEN'), 'stdio still starts; --http refuses (audit-round4-cli)');
+  assert.equal(shortToken.some(issue => issue.level === 'error'), false);
   assert.equal(errors(config({DZ23_STATE_DIR: dir, DZ23_MCP_TOKEN: 'short-token'})).includes('DZ23_MCP_TOKEN'), false);
   assert.equal(errors(config({DZ23_STATE_DIR: dir, DZ23_ALLOW_HTTP: 'true', DZ23_MCP_TOKEN: 'x'.repeat(40)})).includes('DZ23_MCP_TOKEN'), false);
 });

@@ -51,7 +51,7 @@ export async function serve(argv = []) {
       logger.error('http_disabled', {message: 'set DZ23_ALLOW_HTTP=true only after configuring authentication'});
       process.exit(EX_CONFIG);
     }
-    const problem = httpSecurityProblem(cfg);
+    const problem = httpSecurityProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'HTTP bearer tokens must have at least 32 characters' : null);
     if (problem) {
       logger.error('config_invalid', {message: problem});
       process.exit(EX_CONFIG);

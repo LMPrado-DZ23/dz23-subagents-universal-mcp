@@ -85,6 +85,7 @@ export class ProjectMemory {
     this.maxListItems = options.maxListItems || DEFAULT_MAX_LIST_ITEMS;
     this.logger = options.logger || nullLogger;
     this.local = new KeyedMutex();
+    this.knownIds = new Map();
   }
 
   projectDir(projectId) { return path.join(this.root, 'projects', safe(projectId)); }
@@ -115,8 +116,38 @@ export class ProjectMemory {
 
   /** Case-insensitive filesystems would silently alias ids that differ only by case. */
   async assertNoCaseCollision(dir, id) {
-    const clash = (await listIds(dir)).find(name => name !== id && name.toLowerCase() === id.toLowerCase());
+    if (!await this.isCaseInsensitive()) return;
+    // On a case-insensitive filesystem an exact directory name rules out any alias, so only ids not seen yet
+    // pay for a directory listing.
+    if (this.knownIds.get(dir)?.has(id)) return;
+    const names = await listIds(dir);
+    const clash = names.find(name => name !== id && name.toLowerCase() === id.toLowerCase());
     if (clash) throw new ToolError('invalid_request', 'Identifier differs from an existing one only by letter case; reuse the existing identifier with its original letter case');
+    if (!this.knownIds.has(dir) && this.knownIds.size >= 1024) this.knownIds.delete(this.knownIds.keys().next().value);
+    this.knownIds.set(dir, new Set(names));
+  }
+
+  /**
+   * Case aliasing only exists on case-insensitive filesystems (Windows, macOS). On case-sensitive ones
+   * (Linux) `Foo` and `foo` are distinct records and stay reachable. Probed once, after the state root exists.
+   */
+  async isCaseInsensitive() {
+    if (this.caseProbe) return this.caseProbe;
+    try { await fs.access(this.root); } catch { return false; }
+    this.caseProbe = (async () => {
+      const name = `.case-probe-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const file = path.join(this.root, name);
+      await fs.writeFile(file, '');
+      try {
+        await fs.stat(path.join(this.root, name.toUpperCase()));
+        return true;
+      } catch {
+        return false;
+      } finally {
+        await fs.rm(file, {force: true});
+      }
+    })().catch(() => true);
+    return this.caseProbe;
   }
 
   /** Checked on every read and write, not only on creation: lookups would otherwise alias silently. */
