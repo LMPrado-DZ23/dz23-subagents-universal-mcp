@@ -29,7 +29,8 @@ export const DEFAULT_COST_WEIGHTS = Object.freeze({light: 1, discovery: 3, moder
 export const ID_PATTERN = '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$';
 export const PROVIDER_NAME_PATTERN = '^[a-z0-9][a-z0-9_-]{0,39}$';
 export const TARGET_PATTERN = '^(?:auto|[a-z0-9][a-z0-9_-]{0,39}(?::\\S{1,200})?)$';
-export const EXPLICIT_TARGET_PATTERN = '^[a-z0-9][a-z0-9_-]{0,39}(?::\\S{1,200})?$';
+// Explicit targets never accept the routing keyword "auto".
+export const EXPLICIT_TARGET_PATTERN = '^(?!auto(?::|$))[a-z0-9][a-z0-9_-]{0,39}(?::\\S{1,200})?$';
 
 export const RPC_ERRORS = Object.freeze({
   PARSE_ERROR: -32700,

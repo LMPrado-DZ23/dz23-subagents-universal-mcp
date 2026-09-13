@@ -1,6 +1,6 @@
 import {
   ID_PATTERN, PROVIDER_NAME_PATTERN, TARGET_PATTERN, ROLES, SWARM_ROLES, ROUTING_STRATEGIES,
-  SYNTHESIS_MODES, MISSION_STATUSES, CHECKPOINT_MERGE_MODES
+  SYNTHESIS_MODES, MISSION_STATUSES, CHECKPOINT_MERGE_MODES, EXPLICIT_TARGET_PATTERN
 } from './constants.js';
 import {assertSupportedSchema} from './schema.js';
 
@@ -79,6 +79,14 @@ export function buildTools(limits = toolLimits()) {
     {name: 'health_check', title: 'Health check (billable)',
       description: 'Run a tiny real generation on every eligible target in parallel. May consume provider quota or credits.',
       inputSchema: object({}), annotations: annotations('Health check (billable)', {openWorld: true})},
+    {name: 'verify_model', title: 'Verify model inference (billable)',
+      description: 'Run one minimal, non-sensitive generation against provider:model to prove inference access. Requires confirm_billable=true, may consume credits, never runs automatically, never retries or fails over.',
+      inputSchema: object({
+        target: {type: 'string', pattern: EXPLICIT_TARGET_PATTERN, 'x-pattern-reason': 'must be provider or provider:model', description: 'provider:model to verify; it does not need to be in the rotation.'},
+        confirm_billable: {type: 'boolean', const: true, description: 'Must be true: acknowledges that this call may be billed.'},
+        timeout_ms: {type: 'integer', minimum: 1000, maximum: 60_000, default: 15_000, description: 'Timeout for the single generation.'},
+        max_output_tokens: {type: 'integer', minimum: 1, maximum: 32, default: 8, description: 'Output token cap for the generation.'}
+      }, ['target', 'confirm_billable']), annotations: annotations('Verify model inference (billable)', {openWorld: true})},
     {name: 'project_init', title: 'Initialize project memory',
       description: 'Create or update shared project metadata. Does not clone or read the repository.',
       inputSchema: object({

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import {ConcurrencyLimiter} from './concurrency.js';
-import {providerRegistry, parseTarget, callProvider, discoverModels} from './providers.js';
+import {providerRegistry, parseTarget, callProvider, discoverModels, catalogCapabilities} from './providers.js';
 import {toProviderError} from './provider-errors.js';
 import {ToolError, safeText} from './errors.js';
 import {COOLDOWN_MS, NO_FAILOVER_KINDS, ROLES, SWARM_ROLES} from './constants.js';
@@ -54,6 +54,7 @@ export class Router {
     this.exhausted = new Map();
     this.discoveryCache = new Map();
     this.latency = new Map();
+    this.providerStatus = {};
     this.limiter = new ConcurrencyLimiter(cfg.maxConcurrency || 7, cfg.maxWorkersPerTarget || 4, cfg.maxQueue || 32);
     this.retry = {maxRetries: cfg.maxRetries ?? 1, baseDelayMs: cfg.retryBaseDelayMs ?? 500, capMs: cfg.retryAfterCapMs ?? 30_000};
     this.budget = budget || new BudgetLedger(cfg, memory, {clock, metrics});
@@ -95,17 +96,53 @@ export class Router {
     return eligibleTargets(this.cfg, this.registry);
   }
 
+  verificationOf(provider, model) {
+    return (this.providerStatus[provider]?.models || []).find(entry => entry.model === model) || null;
+  }
+
+  /** capabilities = what this adapter exposes; model_capabilities = what the provider catalog declares. */
   listModels() {
-    return this.targets().map(x => ({provider: x.name, model: x.model, tier: x.tier, enabled: x.enabled, base_url: x.baseURL, location: x.location, capabilities: x.capabilities, credential_source: x.credentialSource}));
+    return this.targets().map(x => {
+      const found = this.discoveryCache.get(x.name)?.value?.models?.find(model => model.id === x.model);
+      return {provider: x.name, model: x.model, tier: x.tier, enabled: x.enabled, base_url: x.baseURL, location: x.location, capabilities: x.capabilities,
+        model_capabilities: found?.catalog_capabilities || catalogCapabilities(), inference_verified: Boolean(this.verificationOf(x.name, x.model)?.inference_verified),
+        credential_source: x.credentialSource};
+    });
   }
 
   inventory() {
-    return Object.values(this.registry).map(x => ({
-      provider: x.name, adapter: x.protocol === 'anthropic' ? 'anthropic-native' : 'openai-compatible', base_url: x.baseURL || '',
-      credential_configured: x.configured, credential_source: x.credentialSource, default_model: x.defaultModel || '', tier: x.tier,
-      local_or_cloud: x.location, enabled: x.enabled, capabilities: x.capabilities,
-      status: !x.baseURL ? 'MISSING_BASE_URL' : !x.defaultModel ? 'MISSING_MODEL' : (!x.configured && x.location !== 'local') ? 'MISSING_API_KEY' : 'CONFIGURED'
-    }));
+    return Object.values(this.registry).map(x => {
+      const status = this.providerStatus[x.name] || {};
+      const verification = this.verificationOf(x.name, x.defaultModel);
+      return {
+        provider: x.name, adapter: x.protocol === 'anthropic' ? 'anthropic-native' : 'openai-compatible', base_url: x.baseURL || '',
+        credential_configured: x.configured, credential_source: x.credentialSource, default_model: x.defaultModel || '', tier: x.tier,
+        local_or_cloud: x.location, enabled: x.enabled, capabilities: x.capabilities,
+        status: !x.baseURL ? 'MISSING_BASE_URL' : !x.defaultModel ? 'MISSING_MODEL' : (!x.configured && x.location !== 'local') ? 'MISSING_API_KEY' : 'CONFIGURED',
+        status_flags: {
+          configured: Boolean(x.baseURL && x.defaultModel),
+          credential_present: Boolean(x.credentialSource && x.credentialSource !== 'none'),
+          credential_required: x.location !== 'local',
+          catalog_discovered: Boolean(status.catalog?.ok),
+          inference_verified: Boolean(verification?.inference_verified)
+        },
+        catalog: status.catalog || null,
+        verification
+      };
+    });
+  }
+
+  /** Load persisted catalog/verification status (written by discover and verify_model, possibly by another process). */
+  async loadProviderStatus() {
+    const stored = await this.memory.getProviderStatus?.();
+    if (stored?.providers) this.providerStatus = stored.providers;
+    return this.providerStatus;
+  }
+
+  async recordProviderStatus(provider, update) {
+    const next = this.memory.updateProviderStatus ? await this.memory.updateProviderStatus(provider, update) : update(this.providerStatus[provider] || {});
+    this.providerStatus = {...this.providerStatus, [provider]: next};
+    return next;
   }
 
   /** Cooldown duration depends on the failure kind; invalid requests never cool a target down. */
@@ -175,9 +212,49 @@ export class Router {
       const found = await this.discoverer(target, {timeoutMs: this.cfg.healthTimeoutMs});
       const value = {provider: target.name, base_url: target.baseURL, ok: found.ok, models: found.models || [], count: found.models?.length || 0, kind: found.kind, error: found.error};
       this.discoveryCache.set(target.name, {at: this.clock(), value});
+      await this.recordProviderStatus(target.name, entry => ({...entry, catalog: {ok: found.ok, at: new Date(this.clock()).toISOString(), count: value.count, ...(found.kind ? {kind: found.kind} : {})}}));
       out.push(value);
     }
     return out;
+  }
+
+  /** One minimal billable generation against an explicit target. Never automatic, retried or failed over. */
+  async verifyModel({target, timeout_ms = 15_000, max_output_tokens = 8, request_id} = {}) {
+    let resolved;
+    try { resolved = parseTarget(String(target || ''), this.registry); } catch { throw new ToolError('target_not_allowed', 'Requested target is not a registered provider'); }
+    if (!isEligible(resolved, this.cfg)) throw new ToolError('target_not_allowed', 'Target is disabled, incomplete or disallowed by the cost policy');
+    const messages = [{role: 'user', content: 'Reply with the single word OK.'}];
+    const admission = await this.budget.admit({target: resolved, messages, maxOutputTokens: max_output_tokens, scope: 'system'});
+    if (admission.denied) {
+      throw new ToolError('budget_exceeded', 'Verification is not allowed by the budget or cost policy', {limit: 'target_policy', denials: [{target: targetKey(resolved), reason: admission.denied}]});
+    }
+    const started = this.clock();
+    const verifiedAt = new Date(started).toISOString();
+    const settleDetails = {target: resolved, role: 'verify_model', request_id};
+    let result;
+    try {
+      const output = await this.callTarget(resolved, messages, {timeoutMs: timeout_ms, maxTokens: max_output_tokens, maxResponseBytes: 65_536});
+      const usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
+      result = {provider: resolved.name, model: resolved.model, verified_at: verifiedAt, ok: true, inference_verified: true, latency_ms: this.clock() - started,
+        response_chars: output.content.length, expected_reply: /\bok\b/i.test(output.content), usage};
+    } catch (raw) {
+      if (raw instanceof ToolError) throw raw;
+      const error = toProviderError(raw, resolved);
+      await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
+      this.markFailure(resolved, error);
+      result = {provider: resolved.name, model: resolved.model, verified_at: verifiedAt, ok: false, inference_verified: false, latency_ms: this.clock() - started,
+        kind: error.kind, retryable: error.retryable, ...(error.status ? {http_status: error.status} : {})};
+    } finally {
+      this.budget.release(admission.reservation);
+    }
+    this.logger.child({request_id}).info('model_verification', {provider: resolved.name, model: resolved.model, status: result.ok ? 'success' : 'failed', kind: result.kind, duration_ms: result.latency_ms});
+    await this.recordProviderStatus(resolved.name, entry => {
+      const previous = (entry.models || []).find(item => item.model === resolved.model);
+      const record = {model: resolved.model, inference_verified: result.ok, last_verified_at: verifiedAt, last_success_at: result.ok ? verifiedAt : previous?.last_success_at || null,
+        latency_ms: result.latency_ms, ...(result.kind ? {last_error_kind: result.kind} : {})};
+      return {...entry, models: [...(entry.models || []).filter(item => item.model !== resolved.model), record].slice(-100)};
+    });
+    return result;
   }
 
   async ensureMission(projectId, missionId, goal = '') {

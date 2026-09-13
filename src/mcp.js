@@ -61,10 +61,11 @@ function authorize(ctx, policy) {
 function toolRunner(router, memory) {
   const withRequest = (args, ctx) => ({...args, request_id: ctx.requestId});
   return {
-    list_models: () => router.listModels(),
-    provider_inventory: () => router.inventory(),
+    list_models: async () => { await router.loadProviderStatus?.(); return router.listModels(); },
+    provider_inventory: async () => { await router.loadProviderStatus?.(); return router.inventory(); },
     discover_models: args => router.discover(args),
     health_check: (_args, ctx) => router.healthCheck({request_id: ctx.requestId}),
+    verify_model: (args, ctx) => router.verifyModel(withRequest(args, ctx)),
     project_init: ({project_id, ...fields}) => memory.initProject(project_id, fields),
     mission_status: async ({project_id, mission_id, events_limit}) => ({
       state: await memory.getMission(project_id, mission_id),

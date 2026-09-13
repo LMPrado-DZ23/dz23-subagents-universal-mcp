@@ -170,6 +170,29 @@ export async function callProvider(target, messages, opts = {}) {
   return target.protocol === 'anthropic' ? callAnthropic(target, messages, opts) : callOpenAICompatible(target, messages, opts);
 }
 
+/**
+ * Capabilities as declared by a provider catalog (OpenRouter-style fields when present).
+ * Missing information stays 'unknown'; false only when the catalog lists what it supports.
+ */
+export function catalogCapabilities(model = {}) {
+  const inputs = model?.architecture?.input_modalities;
+  const outputs = model?.architecture?.output_modalities;
+  const params = model?.supported_parameters;
+  const listed = (list, value) => (Array.isArray(list) ? list.includes(value) : 'unknown');
+  const declared = Boolean(model?.architecture) || Array.isArray(params) || Number.isFinite(model?.context_length);
+  return {
+    source: declared ? 'catalog' : 'unknown',
+    text: listed(outputs, 'text'),
+    vision: listed(inputs, 'image'),
+    tools: listed(params, 'tools'),
+    reasoning: Array.isArray(params) && params.includes('reasoning') ? true : 'unknown',
+    embeddings: Array.isArray(outputs) && outputs.includes('embeddings') ? true : 'unknown',
+    streaming: 'unknown',
+    context_length: Number.isFinite(model?.context_length) ? model.context_length : 'unknown',
+    max_output_tokens: Number.isFinite(model?.top_provider?.max_completion_tokens) ? model.top_provider.max_completion_tokens : 'unknown'
+  };
+}
+
 export async function discoverModels(target, {timeoutMs = 15_000} = {}) {
   if (!target.baseURL) return {ok: false, models: [], kind: 'configuration_error', error: 'missing_base_url'};
   const headers = {};
@@ -178,11 +201,7 @@ export async function discoverModels(target, {timeoutMs = 15_000} = {}) {
   try {
     const data = await requestJson(target, `${target.baseURL.replace(/\/$/, '')}/models`, {method: 'GET', headers, timeoutMs});
     const list = Array.isArray(data?.data) ? data.data : Array.isArray(data?.models) ? data.models : [];
-    return {ok: true, models: list.slice(0, 500).map(m => ({
-      id: m.id || m.name || String(m), owned_by: m.owned_by, architecture: m.architecture, providers: m.providers,
-      context_length: Number.isFinite(m.context_length) ? m.context_length : undefined,
-      max_output_tokens: Number.isFinite(m.top_provider?.max_completion_tokens) ? m.top_provider.max_completion_tokens : undefined
-    }))};
+    return {ok: true, models: list.slice(0, 500).map(m => ({id: m.id || m.name || String(m), owned_by: m.owned_by, catalog_capabilities: catalogCapabilities(m)}))};
   } catch (error) {
     const kind = error instanceof ProviderError ? error.kind : 'provider_error';
     return {ok: false, models: [], kind, error: kind, ...(error.status ? {http_status: error.status} : {})};

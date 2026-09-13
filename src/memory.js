@@ -195,6 +195,18 @@ export class ProjectMemory {
     try{return (await fs.readFile(path.join(this.missionDir(projectId,missionId),'usage.jsonl'),'utf8')).split('\n').filter(Boolean).slice(-limit).map(JSON.parse);}
     catch(e){if(e.code==='ENOENT')return[];throw e;}
   }
+  providersDir(){ return path.join(this.root,'providers'); }
+  async getProviderStatus(){ const dir=this.providersDir(); return this.local.run(dir,()=>readJson(path.join(dir,'status.json'),{schema:1,providers:{}})); }
+  /** Replace one provider's persisted catalog/verification status with update(previous). */
+  async updateProviderStatus(provider,update){
+    const dir=this.providersDir();
+    return this.local.run(dir,()=>this.lockAt(dir, async()=>{
+      const file=path.join(dir,'status.json'); const cur=await readJson(file,{schema:1,providers:{}});
+      const providers={...(cur.providers||{})}; const next=update(Object.hasOwn(providers,provider)?providers[provider]:{});
+      Object.defineProperty(providers,provider,{value:next,enumerable:true,writable:true,configurable:true});
+      await atomicJson(file,{schema:1,updated_at:new Date().toISOString(),providers}); return next;
+    }));
+  }
   /** Structured checkpoint from a harness. Creates the mission when absent. */
   async recordCheckpoint(projectId,missionId,fields={},{merge='append'}={}){
     if(!await this.getMission(projectId,missionId)) await this.startMission(projectId,missionId,{goal:fields.goal||''});
