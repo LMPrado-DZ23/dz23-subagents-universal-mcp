@@ -9,7 +9,9 @@ import {RateLimiter} from './ratelimit.js';
 const LOOPBACKS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
 const HTTP_DEFAULTS = Object.freeze({maxBodyBytes: 1024 * 1024, bodyTimeoutMs: 10_000, headersTimeoutMs: 10_000, maxInflight: 32, maxConnections: 128, socketTimeoutMs: 15 * 60_000});
 const RATE_DEFAULTS = Object.freeze({enabled: true, windowMs: 60_000, points: 120, toolPoints: 60, maxConcurrent: 4});
-const REST_TOOLS = {'/api/delegate': 'delegate', '/api/consensus': 'consensus', '/api/swarm': 'swarm_run'};
+const REST_TOOLS = {'/api/delegate': 'delegate', '/api/consensus': 'consensus', '/api/swarm': 'swarm_run', '/api/health': 'health_check'};
+const SAFE_FETCH_SITES = new Set(['same-origin', 'none']);
+const BODY_ERRORS = {request_too_large: 'Request body is too large', request_timeout: 'Request body was not received in time', request_aborted: 'Request body was aborted'};
 
 /** Returns a refusal reason when binding would expose HTTP without adequate authentication. */
 export function httpSecurityProblem(cfg) {
@@ -22,12 +24,23 @@ export function httpSecurityProblem(cfg) {
   return null;
 }
 
+/** The single error envelope for every non-JSON-RPC HTTP response (REST and transport errors). */
+export function errorBody(code, message, ctx, details) {
+  return {error: {code, message, ...(ctx?.requestId ? {request_id: ctx.requestId} : {}), ...(details !== undefined ? {details} : {})}};
+}
+
 function httpError(status, code) {
   return Object.assign(new Error(code), {httpStatus: status});
 }
 
 function isJson(req) {
   return (req.headers['content-type'] || '').toLowerCase().startsWith('application/json');
+}
+
+/** Hostname from the Host header itself (never from an absolute-form request line). */
+function hostnameOf(header) {
+  if (!header) return null;
+  try { return new URL(`http://${header}`).hostname; } catch { return null; }
 }
 
 function readBody(req, {maxBodyBytes, bodyTimeoutMs}) {
@@ -77,39 +90,43 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
     res.end(text);
   }
 
+  function fail(res, status, code, message, ctx, details, extra = {}) {
+    return send(res, status, errorBody(code, message, ctx, details), {...(ctx?.requestId ? {'x-request-id': ctx.requestId} : {}), ...extra});
+  }
+
   function rateLimited(res, error, ctx) {
     metrics?.increment('rate_limit_rejections_total', {limit: error.limit});
     logger?.warn('rate_limited', {request_id: ctx.requestId, identity: ctx.identity, limit: error.limit, retry_after_ms: error.retryAfterMs});
-    return send(res, 429, {error: 'rate_limited', limit: error.limit, retry_after_ms: error.retryAfterMs, request_id: ctx.requestId},
-      {'x-request-id': ctx.requestId, 'retry-after': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))});
+    return fail(res, 429, 'rate_limited', 'Rate limit exceeded', ctx, {limit: error.limit, retry_after_ms: error.retryAfterMs},
+      {'retry-after': String(Math.max(1, Math.ceil(error.retryAfterMs / 1000)))});
   }
 
   async function restTool(res, name, args, ctx) {
-    const headers = {'x-request-id': ctx.requestId};
     try {
       const outcome = await mcpHandler.executeTool(name, args, ctx);
-      if (outcome.ok) return send(res, 200, outcome.value, headers);
-      return send(res, toolErrorHttpStatus(outcome.error), toolErrorPayload(outcome.error, ctx), headers);
+      if (outcome.ok) return send(res, 200, outcome.value, {'x-request-id': ctx.requestId});
+      return send(res, toolErrorHttpStatus(outcome.error), toolErrorPayload(outcome.error, ctx), {'x-request-id': ctx.requestId});
     } catch (error) {
       if (error instanceof RateLimitError) return rateLimited(res, error, ctx);
-      if (error instanceof ForbiddenError) return send(res, 403, {error: 'forbidden', required_scopes: error.requiredScopes, request_id: ctx.requestId}, headers);
+      if (error instanceof ForbiddenError) return fail(res, 403, 'forbidden', 'The token lacks the required scopes', ctx, {required_scopes: error.requiredScopes});
       if (error instanceof RpcError) {
-        return send(res, 400, {error: {code: 'invalid_arguments', message: error.message, ...(error.data || {}), request_id: ctx.requestId}}, headers);
+        const {request_id: _ignored, ...details} = error.data || {};
+        return fail(res, 400, error.message === 'Unknown tool' ? 'unknown_tool' : 'invalid_arguments', error.message, ctx, details);
       }
       throw error;
     }
   }
 
   async function jsonBody(req, res, ctx) {
-    if (!isJson(req)) { send(res, 415, {error: 'application_json_required', request_id: ctx.requestId}); return PARSE_FAILURE; }
+    if (!isJson(req)) { fail(res, 415, 'application_json_required', 'Content-Type must be application/json', ctx); return PARSE_FAILURE; }
     const parsed = parseJson(await readBody(req, limits) || '{}');
-    if (parsed === PARSE_FAILURE) send(res, 400, {error: 'invalid_json', request_id: ctx.requestId});
+    if (parsed === PARSE_FAILURE) fail(res, 400, 'invalid_json', 'Request body is not valid JSON', ctx);
     return parsed;
   }
 
   async function handleMcp(req, res, ctx) {
     const headers = {'x-request-id': ctx.requestId};
-    if (!isJson(req)) return send(res, 415, {error: 'application_json_required', request_id: ctx.requestId}, headers);
+    if (!isJson(req)) return fail(res, 415, 'application_json_required', 'Content-Type must be application/json', ctx);
     const version = req.headers['mcp-protocol-version'];
     if (version !== undefined && !SUPPORTED_PROTOCOL_VERSIONS.includes(version)) {
       return send(res, 400, {jsonrpc: '2.0', id: null, error: {code: RPC_ERRORS.INVALID_REQUEST, message: 'Unsupported protocol version',
@@ -133,8 +150,8 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
     switch (`${req.method} ${url.pathname}`) {
       case 'GET /healthz': return send(res, 200, {ok: true, service: SERVER_NAME, version: SERVER_VERSION}, {'x-request-id': ctx.requestId});
       case 'GET /metrics':
-        if (!metrics) return send(res, 404, {error: 'not_found'});
-        if (!ctx.scopes.has('admin:inventory')) return send(res, 403, {error: 'forbidden', required_scopes: ['admin:inventory'], request_id: ctx.requestId});
+        if (!metrics) return fail(res, 404, 'not_found', 'Not found', ctx);
+        if (!ctx.scopes.has('admin:inventory')) return fail(res, 403, 'forbidden', 'The token lacks the required scopes', ctx, {required_scopes: ['admin:inventory']});
         return send(res, 200, metrics.snapshot(), {'x-request-id': ctx.requestId});
       case 'GET /api/models': return restTool(res, 'list_models', {}, ctx);
       case 'GET /api/providers': return restTool(res, 'provider_inventory', {}, ctx);
@@ -143,18 +160,20 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
         if (url.searchParams.has('provider')) args.provider = url.searchParams.get('provider');
         return restTool(res, 'discover_models', args, ctx);
       }
-      case 'GET /api/health': return restTool(res, 'health_check', {}, ctx);
+      case 'GET /api/health':
+        return fail(res, 405, 'method_not_allowed', 'health_check is billable: use POST with {"confirm_billable": true}', ctx, undefined, {allow: 'POST'});
+      case 'POST /api/health':
       case 'POST /api/delegate':
       case 'POST /api/consensus':
       case 'POST /api/swarm': {
         const body = await jsonBody(req, res, ctx);
         return body === PARSE_FAILURE ? undefined : restTool(res, REST_TOOLS[url.pathname], body, ctx);
       }
-      case 'GET /mcp/tools': return send(res, 200, {tools: mcpHandler.tools});
+      case 'GET /mcp/tools': return send(res, 200, {tools: mcpHandler.tools}, {'x-request-id': ctx.requestId});
       case 'GET /mcp':
-      case 'DELETE /mcp': return send(res, 405, {error: 'method_not_allowed'}, {allow: 'POST'});
+      case 'DELETE /mcp': return fail(res, 405, 'method_not_allowed', 'Only POST is supported on /mcp (no SSE or sessions)', ctx, undefined, {allow: 'POST'});
       case 'POST /mcp': return handleMcp(req, res, ctx);
-      default: return send(res, 404, {error: 'not_found'});
+      default: return fail(res, 404, 'not_found', 'Not found', ctx);
     }
   }
 
@@ -162,30 +181,35 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
     const ctx = {transport: 'http', requestId: acceptRequestId(req.headers['x-request-id']), identity: 'unauthenticated'};
     const started = Date.now();
     res.once('close', () => metrics?.observe('http_request_duration_ms', Date.now() - started, {status: String(res.statusCode)}));
-    if (state.closing) return send(res, 503, {error: 'shutting_down', request_id: ctx.requestId}, {'retry-after': '1'});
+    if (state.closing) return fail(res, 503, 'shutting_down', 'Server is shutting down', ctx, undefined, {'retry-after': '1'});
     if (state.inflight >= limits.maxInflight) {
       metrics?.increment('http_rejections_total', {reason: 'inflight'});
-      return send(res, 503, {error: 'server_busy', request_id: ctx.requestId}, {'retry-after': '1'});
+      return fail(res, 503, 'server_busy', 'Too many requests in progress', ctx, undefined, {'retry-after': '1'});
     }
     state.inflight++;
     res.once('close', () => { state.inflight--; });
+    const hostname = hostnameOf(req.headers.host);
+    if (!hostname) return fail(res, 400, 'invalid_host', 'Missing or invalid Host header', ctx);
+    if (!allowedHosts.has(hostname)) return fail(res, 403, 'host_not_allowed', 'Host is not allowed', ctx);
+    const origin = req.headers.origin;
+    const trustedOrigin = Boolean(origin) && allowedOrigins.has(origin);
+    if (origin && !trustedOrigin) return fail(res, 403, 'origin_not_allowed', 'Origin is not allowed', ctx);
+    // Browsers label cross-site requests even when they send no Origin (images, navigations, prefetch).
+    const site = req.headers['sec-fetch-site'];
+    if (site && !SAFE_FETCH_SITES.has(site) && !trustedOrigin) return fail(res, 403, 'cross_site_request_blocked', 'Cross-site browser requests are not allowed', ctx);
     let url;
-    try { url = new URL(req.url, `http://${req.headers.host || 'invalid'}`); } catch { return send(res, 400, {error: 'invalid_host'}); }
-    if (!allowedHosts.has(url.hostname)) return send(res, 403, {error: 'host_not_allowed'});
-    // Browsers must be explicitly trusted; absence of Origin is normal for MCP CLIs.
-    if (req.headers.origin && !allowedOrigins.has(req.headers.origin)) return send(res, 403, {error: 'origin_not_allowed'});
+    try { url = new URL(req.url, 'http://request.invalid'); } catch { return fail(res, 400, 'invalid_url', 'Invalid request URL', ctx); }
     const remote = req.socket.remoteAddress || 'unknown';
-    const failureKey = `authfail:${remote}`;
-    try {
-      limiter?.check(failureKey, limiter.cost('moderate'));
-    } catch (error) {
-      return rateLimited(res, error, ctx);
-    }
     const principal = authenticator.authenticate(req.headers.authorization, remote);
     if (!principal) {
-      try { limiter?.consume(failureKey, {costClass: 'moderate'}); } catch { /* already exhausted */ }
+      // Only failing attempts are throttled, so a valid token is never locked out by other clients' failures.
+      try {
+        limiter?.consume(`authfail:${remote}`, {costClass: 'moderate'});
+      } catch (error) {
+        return rateLimited(res, error, ctx);
+      }
       logger?.warn('http_unauthorized', {request_id: ctx.requestId});
-      return send(res, 401, {error: 'unauthorized'}, {'www-authenticate': 'Bearer'});
+      return fail(res, 401, 'unauthorized', 'A valid bearer token is required', ctx, undefined, {'www-authenticate': 'Bearer'});
     }
     ctx.identity = principal.identity;
     ctx.scopes = principal.scopes;
@@ -196,12 +220,12 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
     return route(req, res, ctx, url);
   }
 
-  const server = http.createServer((req, res) => {
+  const server = http.createServer({connectionsCheckingInterval: Math.min(limits.headersTimeoutMs, 2000)}, (req, res) => {
     handle(req, res).catch(error => {
       if (res.headersSent) return res.destroy();
-      const status = error.httpStatus || 500;
       if (!error.httpStatus) logger?.error('http_request_failed', {error_name: error.name});
-      send(res, status, {error: error.httpStatus ? error.message : 'request_failed'}, error.httpStatus ? {connection: 'close'} : {});
+      const code = error.httpStatus ? error.message : 'request_failed';
+      fail(res, error.httpStatus || 500, code, BODY_ERRORS[code] || 'Request failed', null, undefined, error.httpStatus ? {connection: 'close'} : {});
       if (error.httpStatus) res.once('finish', () => req.destroy());
     });
   });

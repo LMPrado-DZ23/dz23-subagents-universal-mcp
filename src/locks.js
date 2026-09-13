@@ -65,12 +65,16 @@ export async function inspectLock(lockPath, {staleMs = 30_000, now = Date.now(),
   if (!stale) reason = 'recent';
   else if (!owner) { removable = ageMs > staleMs * 2; reason = removable ? 'no_owner_metadata_and_old' : 'no_owner_metadata'; }
   else if (owner.hostname !== hostname) reason = 'owner_on_other_host';
-  else {
+  else if (Date.parse(owner.created_at) < now - os.uptime() * 1000 - 5000) {
+    // Created before this host last booted: the owner is gone even if its PID was reused.
+    removable = true;
+    reason = 'owner_before_system_boot';
+  } else {
     const alive = processAlive(owner.pid);
     removable = alive === false;
     reason = alive === false ? 'owner_process_not_running' : alive ? 'owner_process_running' : 'owner_process_unknown';
   }
-  return {exists: true, owner, age_ms: Math.round(ageMs), stale, removable, reason};
+  return {exists: true, owner, age_ms: Math.round(ageMs), stale, removable, reason, stale_ms: staleMs};
 }
 
 export function lockSummary(inspection) {
@@ -86,7 +90,15 @@ export async function removeStaleLock(lockPath, inspection) {
   try { await fs.rename(lockPath, parked); } catch { return false; }
   let owner = null;
   try { owner = JSON.parse(await fs.readFile(path.join(parked, OWNER_FILE), 'utf8')); } catch { owner = null; }
-  const same = (owner?.pid ?? null) === (inspection.owner?.pid ?? null) && (owner?.created_at ?? null) === (inspection.owner?.created_at ?? null);
+  let same;
+  if (inspection.owner) {
+    same = Boolean(owner) && owner.pid === inspection.owner.pid && owner.created_at === inspection.owner.created_at;
+  } else {
+    // Owner-less: only the same old directory qualifies. A lock recreated after inspection has a fresh
+    // mtime (or metadata), so it is put back instead of being deleted.
+    const stat = await fs.stat(parked).catch(() => null);
+    same = !owner && Boolean(stat) && Date.now() - stat.mtimeMs > (inspection.stale_ms ?? 30_000) * 2;
+  }
   if (!same) {
     await fs.rename(parked, lockPath).catch(() => {});
     return false;
@@ -114,8 +126,10 @@ export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000
           continue;
         }
         if (expired) {
+          // Owner pid/hostname stay out of client-visible errors; `memory repair` shows them to operators.
+          const {owner: _owner, ...lock} = lockSummary(inspection);
           throw new ToolError('lock_timeout', `Memory lock timeout for ${path.basename(dir)}`,
-            {lock: lockSummary(inspection), recovery: 'Verify no process still uses the lock, then follow docs/OPERATIONS.md (memory locks)'});
+            {lock, recovery: 'Run dz23-subagents memory repair to inspect the owner, then follow docs/OPERATIONS.md (memory locks)'});
         }
       }
       await sleep(20 + Math.random() * 30);
@@ -123,7 +137,16 @@ export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000
   }
   const createdAt = new Date().toISOString();
   const owner = {lock_version: SCHEMA_VERSIONS.lock, pid: process.pid, hostname: os.hostname(), created_at: createdAt, updated_at: createdAt, process_started_at: PROCESS_STARTED_AT};
-  const writeOwner = () => fs.writeFile(path.join(lockPath, OWNER_FILE), JSON.stringify(owner), {mode: 0o600}).catch(() => {});
+  // Atomic owner writes: readers never see a torn owner.json, and each rename refreshes the lock directory mtime.
+  const writeOwner = async () => {
+    const tmp = path.join(lockPath, `${OWNER_FILE}.${crypto.randomUUID()}.tmp`);
+    try {
+      await fs.writeFile(tmp, JSON.stringify(owner), {mode: 0o600});
+      await fs.rename(tmp, path.join(lockPath, OWNER_FILE));
+    } catch {
+      await fs.rm(tmp, {force: true}).catch(() => {});
+    }
+  };
   await writeOwner();
   const heartbeat = setInterval(() => { owner.updated_at = new Date().toISOString(); writeOwner(); }, Math.max(1000, Math.floor(staleMs / 3)));
   heartbeat.unref();

@@ -108,7 +108,7 @@ test('orphan detection only removes locks whose owner is provably gone', async t
   await memory.initProject('dead-owner');
   assert.ok(lines.some(entry => entry.event === 'memory_lock_recovered' && entry.reason === 'owner_process_not_running'));
   plantLock(memory.projectDir('busy'), {pid: process.pid, hostname: os.hostname()}, old);
-  await assert.rejects(memory.initProject('busy'), error => error.code === 'lock_timeout' && error.details.lock.reason === 'owner_process_running' && error.details.lock.owner.pid === process.pid);
+  await assert.rejects(memory.initProject('busy'), error => error.code === 'lock_timeout' && error.details.lock.reason === 'owner_process_running' && error.details.lock.owner === undefined);
   assert.ok(fs.existsSync(path.join(memory.projectDir('busy'), '.lock')), 'a live owner lock is never removed');
 });
 

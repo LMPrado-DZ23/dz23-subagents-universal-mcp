@@ -69,11 +69,14 @@ export function providerRegistry() {
   return Object.fromEntries(Object.entries(defs).map(([name, d]) => {
     const secret = envAny([d.keyName, ...(d.aliases || [])]);
     const local = d.location === 'local';
+    const prefix = name.toUpperCase();
+    // A local server is configured only when the operator sets its key, endpoint or model (or names it in DZ23_ROTATION).
+    const explicitLocal = local && Boolean(secret.value || process.env[`${prefix}_BASE_URL`] || process.env[`${prefix}_MODEL`]);
     return [name, {
       name, baseURL: validateBaseURL(resolvedBase(name, d), name), apiKey: local ? (secret.value || 'local') : secret.value,
       keyName: d.keyName, credentialSource: secret.source, defaultModel: process.env[`${name.toUpperCase()}_MODEL`] || d.defaultModel,
       tier: d.tier, protocol: d.protocol, location: d.location, capabilities: {...d.capabilities},
-      enabled: local || Boolean(secret.value), configured: Boolean(secret.value) || local
+      enabled: explicitLocal || (!local && Boolean(secret.value)), configured: explicitLocal || (!local && Boolean(secret.value))
     }];
   }));
 }

@@ -1,4 +1,4 @@
-DZ23 SUBAGENTS UNIVERSAL MCP 2.3.0 — PACOTE OPEN-SOURCE
+DZ23 SUBAGENTS UNIVERSAL MCP 3.0.0 — PACOTE OPEN-SOURCE
 
 Uma única pasta. Sem ZIP antigo, sem bundle duplicado e sem chaves reais.
 

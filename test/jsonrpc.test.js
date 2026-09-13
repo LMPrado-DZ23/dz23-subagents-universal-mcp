@@ -190,7 +190,8 @@ test('HTTP MCP endpoint contract', async t => {
   assert.equal(correlated.headers.get('x-request-id'), 'client-correlation-42');
   const rest = await fetch(`${url}/api/delegate`, {method: 'POST', headers, body: JSON.stringify({prompt: 5})});
   assert.equal(rest.status, 400);
-  assert.equal((await rest.json()).error.field, 'prompt');
+  const restError = (await rest.json()).error;
+  assert.deepEqual([restError.code, restError.details.field, typeof restError.request_id], ['invalid_arguments', 'prompt', 'string']);
   const everything = JSON.stringify(await (await post(call(11, 'provider_inventory', {}))).json());
   assert.equal(everything.includes(SECRET), false);
   assert.equal(everything.includes(TOKEN), false);

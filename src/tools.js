@@ -77,8 +77,10 @@ export function buildTools(limits = toolLimits()) {
         refresh: {type: 'boolean', default: false, description: 'Bypass the five-minute catalog cache.'}
       }), annotations: annotations('Discover models', {readOnly: true, openWorld: true})},
     {name: 'health_check', title: 'Health check (billable)',
-      description: 'Run a tiny real generation on every eligible target in parallel. May consume provider quota or credits.',
-      inputSchema: object({}), annotations: annotations('Health check (billable)', {openWorld: true})},
+      description: 'Run a tiny real generation on every eligible target in parallel. Requires confirm_billable=true; may consume provider quota or credits.',
+      inputSchema: object({
+        confirm_billable: {type: 'boolean', const: true, description: 'Must be true: acknowledges one billable call per eligible target.'}
+      }, ['confirm_billable']), annotations: annotations('Health check (billable)', {openWorld: true})},
     {name: 'verify_model', title: 'Verify model inference (billable)',
       description: 'Run one minimal, non-sensitive generation against provider:model to prove inference access. Requires confirm_billable=true, may consume credits, never runs automatically, never retries or fails over.',
       inputSchema: object({

@@ -1,6 +1,6 @@
 # Roadmap — metas, não funcionalidades entregues
 
-Entregue na 2.3.0 e fora deste roadmap: validação de schemas, erros JSON-RPC, negociação de
+Entregue na 3.0.0 e fora deste roadmap: validação de schemas, erros JSON-RPC, negociação de
 versão, token por arquivo e escopos, rate limit por processo, logs/métricas, taxonomia de erros,
 orçamento, diversidade de roteamento, `verify_model`, memória versionada e CLI operacional.
 

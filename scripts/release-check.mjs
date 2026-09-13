@@ -9,6 +9,7 @@ export function forbiddenPath(name) {
   const parts = name.replaceAll('\\','/').split('/');
   return parts.some(part => ['.git','node_modules','secrets','state','.dz23-state','.dz23-subagents','generated'].includes(part)) ||
     parts.some(part => /^\.env(?:\..*)?$/.test(part) && part !== '.env.example') ||
+    parts.some(part => /^(?:credentials?|secrets?)(?:[._-].*)?\.json$/i.test(part) || /^token(?:[._-].*)?\.txt$/i.test(part)) ||
     /\.(?:pem|key|p12|pfx|log|tmp|bak|zip|mcpb)$/i.test(name);
 }
 // Heuristic release guard shared with runtime log redaction; not a complete DLP test.

@@ -4,10 +4,13 @@ import {parseJson, newRequestId} from './rpc.js';
 /**
  * Newline-delimited JSON-RPC over stdio. Messages are processed in arrival order.
  * Only protocol messages are written to stdout; diagnostics go to the logger (stderr).
+ * A frame larger than maxFrameBytes is reported once and dropped up to its newline without
+ * being buffered, so memory stays bounded by maxFrameBytes plus one chunk.
  */
 export function startStdio({processMessage, maxFrameBytes, logger, input = process.stdin, output = process.stdout}) {
   const session = {protocolVersion: null};
   let buffer = '';
+  let bufferBytes = 0;
   let discarding = false;
   let chain = Promise.resolve();
 
@@ -25,22 +28,34 @@ export function startStdio({processMessage, maxFrameBytes, logger, input = proce
 
   input.setEncoding('utf8');
   input.on('data', chunk => {
-    buffer += chunk;
-    let index;
-    while ((index = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, index).trim();
-      buffer = buffer.slice(index + 1);
-      if (discarding) { discarding = false; continue; }
-      if (!line) continue;
-      if (Buffer.byteLength(line) > maxFrameBytes) { oversized(); continue; }
-      enqueue(line);
-    }
-    if (!discarding && Buffer.byteLength(buffer) > maxFrameBytes) {
+    let text = chunk;
+    while (text.length) {
+      const end = text.indexOf('\n');
+      if (discarding) {
+        if (end < 0) return;
+        text = text.slice(end + 1);
+        discarding = false;
+        continue;
+      }
+      const piece = end < 0 ? text : text.slice(0, end);
+      bufferBytes += Buffer.byteLength(piece);
+      if (bufferBytes > maxFrameBytes) {
+        buffer = '';
+        bufferBytes = 0;
+        oversized();
+        if (end < 0) { discarding = true; return; }
+        text = text.slice(end + 1);
+        continue;
+      }
+      buffer += piece;
+      if (end < 0) return;
+      const line = buffer.trim();
       buffer = '';
-      discarding = true;
-      oversized();
+      bufferBytes = 0;
+      text = text.slice(end + 1);
+      if (line) enqueue(line);
     }
   });
   const finished = new Promise(resolve => input.on('end', () => chain.then(resolve)));
-  return {session, finished, idle: () => chain};
+  return {session, finished, idle: () => chain, bufferedBytes: () => bufferBytes};
 }

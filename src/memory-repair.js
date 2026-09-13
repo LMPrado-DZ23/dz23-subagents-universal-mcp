@@ -43,9 +43,12 @@ export async function inspectMemory(memory, {projectId} = {}) {
       missionsScanned++;
       try { await memory.getMission(project, mission); } catch (error) {
         if (!(error instanceof ToolError)) throw error;
-        const checkpoint = await latestValidCheckpoint(memory.checkpointDir(project, mission));
+        // Only unreadable records are restorable; a newer schema is valid data from a newer version.
+        const restorable = ['corrupt_json', 'corrupt_shape'].includes(error.details?.kind);
+        const checkpoint = restorable ? await latestValidCheckpoint(memory.checkpointDir(project, mission)) : null;
         issues.push({type: 'corrupt_mission_state', project, mission, file: rel(memory.missionFile(project, mission)), detail: error.details?.kind,
-          repairable: Boolean(checkpoint), ...(checkpoint ? {checkpoint: checkpoint.name} : {action: 'manual: no valid checkpoint available'})});
+          repairable: Boolean(checkpoint),
+          ...(checkpoint ? {checkpoint: checkpoint.name} : {action: restorable ? 'manual: no valid checkpoint available' : 'manual: written by a newer version; upgrade instead of restoring'})});
       }
       const tail = await readJournalTail(memory.journalFile(project, mission));
       if (tail.trailingIncomplete) issues.push({type: 'journal_incomplete_line', project, mission, file: rel(memory.journalFile(project, mission)), repairable: true});

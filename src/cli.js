@@ -34,6 +34,13 @@ Exit codes: 0 ok, 1 problems found, 2 usage error, 78 configuration error.`;
 
 class UsageError extends Error {}
 
+/** Errors go to stderr; with --json the same error is also a JSON object on stdout. */
+function failure(io, json, code, label, message, exit) {
+  io.stderr.write(`${label}: ${message}\n`);
+  if (json) io.stdout.write(`${JSON.stringify({error: {code, message}}, null, 2)}\n`);
+  return exit;
+}
+
 function print(io, value, json, human) {
   io.stdout.write(json ? `${JSON.stringify(value, null, 2)}\n` : `${human(value)}\n`);
 }
@@ -93,7 +100,7 @@ async function doctor(opts, io) {
   const unknown = cfg.rotation.filter(entry => { try { parseTarget(entry, router.registry); return false; } catch { return true; } });
   if (unknown.length) add('rotation', 'fail', `${unknown.length} DZ23_ROTATION entr${unknown.length === 1 ? 'y has' : 'ies have'} an unknown provider`);
   const targets = unknown.length ? [] : router.targets();
-  add('providers', targets.length ? 'pass' : 'warn', `${targets.length} eligible routing target(s), ${router.inventory().filter(p => p.enabled).length} enabled provider(s); no network calls made`);
+  add('providers', targets.length ? 'pass' : 'fail',`${targets.length} eligible routing target(s), ${router.inventory().filter(p => p.enabled).length} enabled provider(s); no network calls made`);
   if (cfg.allowHttp) {
     const problem = httpSecurityProblem(cfg);
     add('http', problem ? 'fail' : 'pass', problem || `enabled on ${cfg.host}:${cfg.port}, auth ${cfg.authMode}, token source ${cfg.tokenSource}`);
@@ -106,9 +113,9 @@ async function doctor(opts, io) {
   add('budget', bypass ? 'warn' : 'pass', `${costLimits ? 'cost limits set' : 'no cost limits'}; policy ${budget.policy}; ${Object.keys(budget.prices).length} price entr${Object.keys(budget.prices).length === 1 ? 'y' : 'ies'}${bypass ? '; unpriced targets are not bound by cost limits' : ''}`);
   try {
     const report = await inspectMemory(memory);
-    const blocking = report.issues.filter(issue => ['corrupt_project', 'corrupt_mission_state'].includes(issue.type) && !issue.repairable);
+    const unreadable = report.issues.filter(issue => ['corrupt_project', 'corrupt_mission_state'].includes(issue.type));
     const repairable = report.issues.filter(issue => issue.repairable);
-    add('memory', blocking.length ? 'fail' : repairable.length ? 'warn' : 'pass',
+    add('memory', unreadable.length ? 'fail' : repairable.length ? 'warn' : 'pass',
       `${report.projects_scanned} project(s), ${report.missions_scanned} mission(s), ${report.issues.length} issue(s)${repairable.length ? '; run: dz23-subagents memory repair' : ''}`);
   } catch (error) {
     add('memory', 'fail', error instanceof ToolError ? error.message : 'memory inspection failed');
@@ -220,6 +227,7 @@ async function tokenCommand(positionals, opts, io) {
   for await (const chunk of io.stdin) chunks.push(Buffer.from(chunk));
   const value = Buffer.concat(chunks).toString('utf8').replace(/\s+$/u, '');
   if (!value || !/^[\x21-\x7e]+$/.test(value)) throw new UsageError('the token must be non-empty printable ASCII without spaces');
+  if (value.length < 32) throw new UsageError('tokens must have at least 32 characters; generate them with a cryptographic random generator');
   print(io, {sha256: sha256Hex(value)}, opts.json, result => result.sha256);
   return EXIT.OK;
 }
@@ -232,8 +240,9 @@ export async function runCli(argv, io = {stdout: process.stdout, stderr: process
       help: {type: 'boolean', short: 'h'}, version: {type: 'boolean'}
     }});
   } catch (error) {
-    io.stderr.write(`Usage error: ${error.message}\n\n${USAGE}\n`);
-    return EXIT.USAGE;
+    const code = failure(io, argv.includes('--json'), 'usage_error', 'Usage error', error.message, EXIT.USAGE);
+    io.stderr.write(`\n${USAGE}\n`);
+    return code;
   }
   const {values: opts, positionals} = parsed;
   const [command, ...rest] = positionals;
@@ -255,10 +264,10 @@ export async function runCli(argv, io = {stdout: process.stdout, stderr: process
       default: throw new UsageError(`unknown command: ${String(command).slice(0, 40)}`);
     }
   } catch (error) {
-    if (error instanceof UsageError) { io.stderr.write(`Usage error: ${error.message}\n`); return EXIT.USAGE; }
-    if (error instanceof ConfigError) { io.stderr.write(`Configuration error: ${error.message}\n`); return EXIT.CONFIG; }
-    if (error instanceof ToolError) { io.stderr.write(`Error (${error.code}): ${error.message}\n`); return EXIT.PROBLEMS; }
-    io.stderr.write(`Unexpected error: ${error?.name || 'Error'}\n`);
-    return EXIT.PROBLEMS;
+    const json = Boolean(opts.json);
+    if (error instanceof UsageError) return failure(io, json, 'usage_error', 'Usage error', error.message, EXIT.USAGE);
+    if (error instanceof ConfigError) return failure(io, json, 'config_error', 'Configuration error', error.message, EXIT.CONFIG);
+    if (error instanceof ToolError) return failure(io, json, error.code, `Error (${error.code})`, error.message, EXIT.PROBLEMS);
+    return failure(io, json, 'internal_error', 'Unexpected error', error?.name || 'Error', EXIT.PROBLEMS);
   }
 }

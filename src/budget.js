@@ -46,7 +46,10 @@ function budgetExceeded(limit, details) {
  */
 export class BudgetLedger {
   constructor(cfg, memory, {clock = Date.now, metrics = null} = {}) {
-    this.limits = {...DEFAULT_BUDGET, ...(cfg.budget || {})};
+    const provided = cfg.budget || {};
+    const costLimits = ['missionCostUsd', 'projectCostUsd', 'dailyCostUsd', 'callCostUsd'].some(key => provided[key] !== null && provided[key] !== undefined);
+    // With cost limits, calls of unknown cost would escape them: fail closed unless a policy is set explicitly.
+    this.limits = {...DEFAULT_BUDGET, ...provided, policy: provided.policy || (costLimits ? 'deny_unknown_cost' : 'allow_unknown_cost')};
     if (!COST_POLICIES.includes(this.limits.policy)) throw new ConfigError(`DZ23_COST_POLICY must be one of: ${COST_POLICIES.join(', ')}`);
     this.memory = memory;
     this.clock = clock;
@@ -153,10 +156,11 @@ export class BudgetLedger {
     return this.mutex.run(async () => {
       if (reservation.record) return reservation.record;
       const record = this.buildRecord(reservation, details);
-      reservation.record = record;
       try {
         if (reservation.scope === 'mission') await this.memory.recordUsage(details.project_id, details.mission_id, record);
         else await this.memory.recordSystemUsage(record);
+        // Cache only after the write succeeded, so a failed write can be retried instead of silently lost.
+        reservation.record = record;
       } finally {
         this.release(reservation);
       }

@@ -68,11 +68,11 @@ function take(items, limit, fromEnd) {
   return {lines, included, truncated: truncated || lines.some(line => line.endsWith('…[truncated]'))};
 }
 
-export function buildContext({project, mission, events = [], maxChars = 60_000}) {
+export function buildContext({project, mission, events = [], maxChars = 60_000, exclude = []}) {
   const budget = Math.max(400, maxChars - RESERVED);
   const cap = Math.max(200, Math.floor(budget * FIRST_PASS_SHARE));
   const all = collect(project, mission, events);
-  const state = SECTIONS.map(([name, keep]) => ({name, keep, items: all[name], header: `## ${name.toUpperCase()}\n`, chosen: null, size: 0}));
+  const state = SECTIONS.map(([name, keep]) => ({name, keep, items: exclude.includes(name) ? [] : all[name], header: `## ${name.toUpperCase()}\n`, chosen: null, size: 0}));
   let used = 0;
   const fill = (section, limit) => {
     const chosen = take(section.items, limit, section.keep === 'tail');

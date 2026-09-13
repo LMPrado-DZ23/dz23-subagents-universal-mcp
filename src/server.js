@@ -26,6 +26,10 @@ export async function serve(argv = []) {
   const logger = createLogger({level: cfg.logLevel});
   logger.addSecrets([cfg.token]);
   for (const issue of cfg.configIssues) logger[issue.level === 'error' ? 'error' : 'warn']('config_issue', issue);
+  if (cfg.configIssues.some(issue => issue.level === 'error')) {
+    logger.error('config_invalid', {message: 'fix the configuration errors above before starting; run: dz23-subagents config validate'});
+    process.exit(EX_CONFIG);
+  }
   const metrics = new Metrics();
   const memory = new ProjectMemory(cfg.stateDir, {...cfg, logger});
   const router = new Router(cfg, memory, {logger, metrics});

@@ -4,7 +4,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v2.3.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
+**v3.0.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
 
 [English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
@@ -99,10 +99,12 @@ Para nuvem: configure a chave em privado, rode `discover_models`, confirme com
 ## Custos e orçamento
 
 `free-first` apenas ordena categorias. `DZ23_ALLOW_PAID=false` bloqueia `paid` e `low-cost`,
-inclusive alvos explícitos. Para limitar gasto, defina uma tabela de preços
-(`DZ23_PRICES_FILE`), `DZ23_COST_POLICY=deny_unknown_cost` e limites como
-`DZ23_MAX_DAILY_COST_USD`, `DZ23_MAX_MISSION_COST_USD` ou `DZ23_MAX_MISSION_CALLS`.
+inclusive alvos explícitos e, sem `DZ23_ROTATION`, modelos que não sejam o padrão do provider.
+Para limitar gasto, defina uma tabela de preços (`DZ23_PRICES_FILE`) e limites como
+`DZ23_MAX_DAILY_COST_USD`, `DZ23_MAX_MISSION_COST_USD` ou `DZ23_MAX_MISSION_CALLS`; com limite de
+custo, chamadas de custo desconhecido são negadas por padrão (`DZ23_COST_POLICY`).
 O orçamento é verificado antes de cada chamada, inclusive retries, revisores e `health_check`.
+`health_check` e `verify_model` exigem `confirm_billable: true`.
 Preços nunca são inventados: sem tabela, o custo aparece como `unknown`. Configure também
 limites de gasto no fornecedor. Detalhes em [Operação](docs/OPERATIONS.md#orçamento).
 

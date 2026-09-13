@@ -22,26 +22,29 @@ function safe(value) {
   return value;
 }
 
-function mergeList(current, incoming, merge) {
-  if (merge === 'replace') return [...incoming];
+export const DEFAULT_MAX_LIST_ITEMS = 500;
+
+/** Merge a checkpoint list, keeping at most `maxItems` (the newest). */
+function mergeList(current, incoming, merge, maxItems) {
+  if (merge === 'replace') return [...incoming].slice(-maxItems);
   const out = [...(Array.isArray(current) ? current : [])];
   const seen = new Set(out.map(item => JSON.stringify(item)));
   for (const item of incoming) {
     const key = JSON.stringify(item);
     if (!seen.has(key)) { seen.add(key); out.push(item); }
   }
-  return out;
+  return out.slice(-maxItems);
 }
 
 /** Only provided fields change; an omitted status keeps the current status. */
-export function mergeCheckpointFields(state, fields, merge = 'append') {
+export function mergeCheckpointFields(state, fields, merge = 'append', maxItems = DEFAULT_MAX_LIST_ITEMS) {
   const patch = {};
   for (const key of CHECKPOINT_SCALARS) if (fields[key] !== undefined) patch[key] = fields[key];
-  for (const key of CHECKPOINT_LISTS) if (fields[key] !== undefined) patch[key] = mergeList(state?.[key], fields[key], merge);
+  for (const key of CHECKPOINT_LISTS) if (fields[key] !== undefined) patch[key] = mergeList(state?.[key], fields[key], merge, maxItems);
   if (fields.tests) {
     const current = state?.tests || {};
     patch.tests = {...current};
-    for (const key of ['passed', 'failed', 'pending']) if (fields.tests[key]) patch.tests[key] = mergeList(current[key], fields.tests[key], merge);
+    for (const key of ['passed', 'failed', 'pending']) if (fields.tests[key]) patch.tests[key] = mergeList(current[key], fields.tests[key], merge, maxItems);
   }
   return patch;
 }
@@ -71,6 +74,8 @@ export class ProjectMemory {
     this.lockTimeoutMs = options.lockTimeoutMs || 20_000;
     this.lockStaleMs = options.lockStaleMs || 30_000;
     this.durable = options.durableWrites !== false;
+    this.maxStateBytes = options.maxStateBytes || 4 * 1024 * 1024;
+    this.maxListItems = options.maxListItems || DEFAULT_MAX_LIST_ITEMS;
     this.logger = options.logger || nullLogger;
     this.local = new KeyedMutex();
   }
@@ -101,8 +106,15 @@ export class ProjectMemory {
     return migrate(value);
   }
 
+  /** Case-insensitive filesystems would silently alias ids that differ only by case. */
+  async assertNoCaseCollision(dir, id) {
+    const clash = (await listIds(dir)).find(name => name !== id && name.toLowerCase() === id.toLowerCase());
+    if (clash) throw new ToolError('invalid_request', 'Identifier differs from an existing one only by letter case; reuse the existing identifier', {existing: clash});
+  }
+
   async initProject(projectId, data = {}) {
     return this.withLock(projectId, async () => {
+      await this.assertNoCaseCollision(path.join(this.root, 'projects'), projectId);
       const now = new Date().toISOString();
       const project = (await this.readRecord(this.projectFile(projectId), migrateProject)) || newProject(projectId, now);
       const next = {...project, ...data, updated_at: now};
@@ -118,6 +130,7 @@ export class ProjectMemory {
   async startMission(projectId, missionId, data = {}) {
     await this.initProject(projectId);
     return this.withLock(projectId, async () => {
+      await this.assertNoCaseCollision(path.join(this.projectDir(projectId), 'missions'), missionId);
       const now = new Date().toISOString();
       const mission = (await this.readRecord(this.missionFile(projectId, missionId), migrateMission)) || newMission(projectId, missionId, now);
       const next = {...mission, ...data, updated_at: now};
@@ -171,7 +184,11 @@ export class ProjectMemory {
       const state = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
       if (!state) throw new ToolError('mission_not_found', 'Mission not found');
       const sequence = (state.sequence || 0) + 1;
-      const snapshot = {...state, ...extra, sequence, checkpoint_at: new Date().toISOString(), checkpoint_schema: SCHEMA_VERSIONS.checkpoint};
+      // A function patch is computed from the state read under this lock (no lost concurrent appends).
+      const patch = typeof extra === 'function' ? extra(state) : extra;
+      const snapshot = {...state, ...patch, sequence, checkpoint_at: new Date().toISOString(), checkpoint_schema: SCHEMA_VERSIONS.checkpoint};
+      const bytes = Buffer.byteLength(JSON.stringify(snapshot));
+      if (bytes > this.maxStateBytes) throw new ToolError('memory_limit_exceeded', 'Mission state would exceed DZ23_MAX_STATE_BYTES', {bytes, max_bytes: this.maxStateBytes});
       const dir = this.checkpointDir(projectId, missionId);
       await this.write(path.join(dir, `${String(sequence).padStart(6, '0')}.json`), snapshot);
       await this.write(this.missionFile(projectId, missionId), snapshot);
@@ -184,8 +201,7 @@ export class ProjectMemory {
   /** Structured checkpoint from a harness. Creates the mission when absent. */
   async recordCheckpoint(projectId, missionId, fields = {}, {merge = 'append'} = {}) {
     if (!await this.getMission(projectId, missionId)) await this.startMission(projectId, missionId, {goal: fields.goal || ''});
-    const state = await this.getMission(projectId, missionId);
-    return this.checkpoint(projectId, missionId, mergeCheckpointFields(state, fields, merge));
+    return this.checkpoint(projectId, missionId, state => mergeCheckpointFields(state, fields, merge, this.maxListItems));
   }
 
   readJournal(projectId, missionId, limit = 50) {
@@ -196,9 +212,9 @@ export class ProjectMemory {
     return (await this.readJournal(projectId, missionId, limit)).events;
   }
 
-  async contextBundleDetailed(projectId, missionId, maxChars = 120_000) {
+  async contextBundleDetailed(projectId, missionId, maxChars = 120_000, {exclude = []} = {}) {
     const [project, mission, journal] = await Promise.all([this.getProject(projectId), this.getMission(projectId, missionId), this.readJournal(projectId, missionId, 30)]);
-    return buildContext({project, mission, events: journal.events, maxChars});
+    return buildContext({project, mission, events: journal.events, maxChars, exclude});
   }
 
   async contextBundle(projectId, missionId, maxChars = 120_000) {

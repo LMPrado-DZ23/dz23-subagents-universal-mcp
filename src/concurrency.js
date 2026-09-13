@@ -1,3 +1,5 @@
+import {ToolError} from './errors.js';
+
 /** In-process call limits, shared by delegates, swarms, retries and health checks. */
 export class ConcurrencyLimiter {
   constructor(maxTotal, maxPerTarget, maxQueue = 32) {
@@ -9,7 +11,7 @@ export class ConcurrencyLimiter {
     this.queue = [];
   }
   async run(key, operation) {
-    if (this.queue.length >= this.maxQueue) throw new Error('Delegation queue is full');
+    if (this.queue.length >= this.maxQueue) throw new ToolError('queue_full', 'Delegation queue is full; retry later');
     await new Promise(resolve => { this.queue.push({key, resolve}); this.drain(); });
     try { return await operation(); }
     finally {

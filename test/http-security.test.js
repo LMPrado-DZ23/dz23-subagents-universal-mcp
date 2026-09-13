@@ -171,6 +171,8 @@ test('repeated authentication failures from one address are throttled', async t 
   const third = await rpc({jsonrpc: '2.0', id: 3, method: 'ping'}, 'bad-3');
   assert.equal(third.status, 429);
   assert.ok(third.headers.get('retry-after'));
+  // Only failing attempts are throttled: a valid token from the same address is never locked out.
+  assert.equal((await rpc({jsonrpc: '2.0', id: 4, method: 'ping'})).status, 200);
 });
 
 test('in-flight cap answers 503 and releases the slot afterwards', async t => {

@@ -6,32 +6,34 @@
 
 Self-hosted MCP router for delegating text/code tasks to AI models, running parallel
 specialists and keeping explicit, versioned mission memory that another harness can resume.
-Version 2.3.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
+Version 3.0.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
 
 Workers return text/code. They do not execute shell commands, edit repositories, use browsers
 or run tests; the host harness owns those operations. Handoff works through persisted state,
 not hidden model thoughts or unrecorded client conversations.
 
-## What 2.3.0 provides
+## What 3.0.0 provides
 
 - **MCP**: 11 tools, protocol revisions 2025-11-25 and 2025-06-18, enforced closed schemas with
   bounded inputs, standard JSON-RPC errors, tool execution errors with `request_id`.
 - **HTTP (opt-in)**: bearer token from env or file, optional per-token scopes (SHA-256 digests),
-  Host/Origin checks, per-process rate limiting with 429 + Retry-After, body/time/in-flight limits,
-  graceful shutdown. No SSE, sessions or OAuth.
+  Host header/Origin and cross-site (`Sec-Fetch-Site`) checks, per-process rate limiting with 429 +
+  Retry-After, auth-failure throttling that never locks out valid tokens, billable REST routes only
+  via POST with confirmation, body/time/in-flight limits, graceful shutdown. No SSE, sessions or OAuth.
 - **Providers**: OpenAI-compatible and Anthropic Messages adapters, 13-kind error taxonomy, bounded
   retries only for rate limits/timeouts/unavailability, no failover for invalid requests,
-  per-kind cooldowns, `verify_model` (requires `confirm_billable: true`), catalog capabilities
+  per-kind cooldowns, `verify_model` and `health_check` (both require `confirm_billable: true`), catalog capabilities
   reported as `unknown` when undeclared.
 - **Routing**: `first`, `round_robin`, `provider_diversity`, `model_diversity`, `cost_optimized`,
   `latency_optimized`; requested vs effective strategy and observed diversity are reported.
   `consensus` uses distinct targets and a labeled heuristic synthesis.
 - **Budgets**: input tokens, mission calls/tokens, per-call/mission/project/daily cost limits,
-  `allow_unknown_cost`/`deny_unknown_cost`, prices only from an explicit table, usage records with
+  `allow_unknown_cost`/`deny_unknown_cost` (deny is the default once a cost limit is set), prices only from an explicit table, usage records with
   token and cost provenance.
 - **Memory**: schema versions with read-time migrations, integrity errors instead of silent resets,
   owner-aware locks with safe orphan recovery, monotonic journal sequence, layered context with
-  truncation report, `memory repair`.
+  truncation report, bounded checkpoints, harness-owned `status`/`next_action`/`goal` that tools never
+  overwrite, `memory repair`.
 - **Operations**: redacted JSON Lines logs on stderr, process metrics (`GET /metrics`), CLI
   (`doctor`, `config validate`, `providers`, `health --yes`, `missions`, `memory repair`, `token hash`).
 

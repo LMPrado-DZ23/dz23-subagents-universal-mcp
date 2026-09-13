@@ -26,6 +26,7 @@ Valores de chaves e tokens não aparecem em inventário, resultados, erros, mét
 logs. `provider_inventory` mostra apenas a origem (`env:NOME`, `file:NOME_FILE`, `none`).
 Erros de provider são classificados por status e padrões e nunca retornam o corpo recebido.
 Falhas inesperadas aparecem como `internal_error`, sem mensagem interna ou caminho de arquivo.
+Erros de lock não expõem `pid` nem `hostname` a clientes.
 
 ## Outros cuidados
 
@@ -36,3 +37,4 @@ Falhas inesperadas aparecem como `internal_error`, sem mensagem interna ou camin
   podem conter dados sensíveis na memória de missão, que precisa ser protegida pelo operador.
 - O scanner de publicação verifica padrões conhecidos e a allowlist; não prova ausência de todo
   segredo possível. `npm run check:public` confirma que só arquivos auditados estão rastreados.
+- O guard de publicação também recusa nomes como `credentials*.json`, `secrets*.json` e `token*.txt`.

@@ -58,6 +58,16 @@ function authorize(ctx, policy) {
   if (missing.length) throw new ForbiddenError(policy.scopes);
 }
 
+const SUMMARY_LISTS = ['acceptance_criteria', 'decisions', 'invariants', 'completed_tasks', 'active_tasks', 'blocked_tasks', 'next_tasks', 'known_failures', 'files_read', 'files_changed', 'artifacts'];
+
+/** Checkpoint acknowledgement without echoing the whole (possibly large) mission state. */
+function checkpointSummary(snapshot) {
+  const counts = Object.fromEntries(SUMMARY_LISTS.map(key => [key, Array.isArray(snapshot[key]) ? snapshot[key].length : 0]));
+  const tests = Object.fromEntries(['passed', 'failed', 'pending'].map(key => [key, snapshot.tests?.[key]?.length || 0]));
+  return {project_id: snapshot.project_id, mission_id: snapshot.mission_id, sequence: snapshot.sequence, status: snapshot.status,
+    next_action: snapshot.next_action || '', checkpoint_at: snapshot.checkpoint_at, goal_set: Boolean(snapshot.goal), counts, tests};
+}
+
 function toolRunner(router, memory) {
   const withRequest = (args, ctx) => ({...args, request_id: ctx.requestId});
   return {
@@ -72,7 +82,7 @@ function toolRunner(router, memory) {
       return {state: await memory.getMission(project_id, mission_id), recent_events: journal.events,
         journal_integrity: {invalid_lines: journal.invalid_lines, last_seq: journal.last_seq}};
     },
-    memory_checkpoint: ({project_id, mission_id, merge, ...fields}) => memory.recordCheckpoint(project_id, mission_id, fields, {merge}),
+    memory_checkpoint: async ({project_id, mission_id, merge, ...fields}) => checkpointSummary(await memory.recordCheckpoint(project_id, mission_id, fields, {merge})),
     delegate: (args, ctx) => router.delegate(withRequest(args, ctx)),
     consensus: (args, ctx) => router.consensus(withRequest(args, ctx)),
     swarm_run: (args, ctx) => router.swarmRun(withRequest(args, ctx))

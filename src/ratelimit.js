@@ -22,14 +22,28 @@ export class RateLimiter {
     const time = this.now();
     let entry = this.buckets.get(key);
     if (!entry) {
-      entry = {tokens: capacity, updated: time};
-      this.buckets.set(key, entry);
-      if (this.buckets.size > this.maxKeys) this.buckets.delete(this.buckets.keys().next().value);
+      entry = {tokens: capacity, updated: time, capacity};
+      if (this.buckets.size >= this.maxKeys) this.evict(time);
     } else {
       entry.tokens = Math.min(capacity, entry.tokens + (time - entry.updated) * capacity / this.windowMs);
       entry.updated = time;
+      this.buckets.delete(key);
     }
+    this.buckets.set(key, entry); // Map order doubles as least-recently-used order.
     return entry;
+  }
+
+  /**
+   * Evict least-recently-used buckets that have refilled completely: dropping them loses nothing.
+   * Depleted buckets are kept so an attacker cannot reset its own limit by flooding new keys;
+   * only past twice the key budget is the oldest bucket dropped regardless, bounding memory.
+   */
+  evict(time) {
+    for (const [key, entry] of this.buckets) {
+      if (this.buckets.size < this.maxKeys) return;
+      if (entry.tokens + (time - entry.updated) * entry.capacity / this.windowMs >= entry.capacity) this.buckets.delete(key);
+    }
+    while (this.buckets.size >= this.maxKeys * 2) this.buckets.delete(this.buckets.keys().next().value);
   }
 
   waitMs(entry, cost, capacity) {

@@ -4,7 +4,10 @@ import {providerRegistry, parseTarget, callProvider, discoverModels, catalogCapa
 import {toProviderError} from './provider-errors.js';
 import {ToolError, safeText} from './errors.js';
 import {COOLDOWN_MS, NO_FAILOVER_KINDS, ROLES, SWARM_ROLES} from './constants.js';
-import {eligibleTargets, isEligible, targetKey} from './targets.js';
+import {eligibleTargets, isEligible, ineligibleReason, modelAllowed, targetKey, withRotationOptIn} from './targets.js';
+
+/** Per-target maps accept caller-chosen model names, so they are bounded (oldest entry evicted). */
+const boundedSet = (map, key, value) => { if (!map.has(key) && map.size >= 512) map.delete(map.keys().next().value); map.set(key, value); };
 import {buildMessages} from './prompts.js';
 import {nullLogger} from './logger.js';
 import {BudgetLedger} from './budget.js';
@@ -78,7 +81,7 @@ export class Router {
   recordLatency(target, ms) {
     const key = targetKey(target);
     const current = this.latency.get(key);
-    this.latency.set(key, current === undefined ? ms : current + 0.3 * (ms - current));
+    boundedSet(this.latency, key, current === undefined ? ms : current + 0.3 * (ms - current));
     this.metrics?.observe('provider_latency_ms', ms, {target: key});
     this.metrics?.recordLatency(key, ms);
   }
@@ -117,7 +120,7 @@ export class Router {
         provider: x.name, adapter: x.protocol === 'anthropic' ? 'anthropic-native' : 'openai-compatible', base_url: x.baseURL || '',
         credential_configured: x.configured, credential_source: x.credentialSource, default_model: x.defaultModel || '', tier: x.tier,
         local_or_cloud: x.location, enabled: x.enabled, capabilities: x.capabilities,
-        status: !x.baseURL ? 'MISSING_BASE_URL' : !x.defaultModel ? 'MISSING_MODEL' : (!x.configured && x.location !== 'local') ? 'MISSING_API_KEY' : 'CONFIGURED',
+        status: !x.baseURL ? 'MISSING_BASE_URL' : !x.defaultModel ? 'MISSING_MODEL' : !x.configured ? (x.location === 'local' ? 'DEFAULT_ENDPOINT_NOT_CONFIGURED' : 'MISSING_API_KEY') : 'CONFIGURED',
         status_flags: {
           configured: Boolean(x.baseURL && x.defaultModel),
           credential_present: Boolean(x.credentialSource && x.credentialSource !== 'none'),
@@ -150,7 +153,7 @@ export class Router {
     const base = COOLDOWN_MS[normalized.kind] ?? 60_000;
     if (!base) return;
     const now = this.clock();
-    this.exhausted.set(targetKey(target), {at: now, until: now + Math.max(base, normalized.retryAfterMs), kind: normalized.kind});
+    boundedSet(this.exhausted, targetKey(target), {at: now, until: now + Math.max(base, normalized.retryAfterMs), kind: normalized.kind});
   }
 
   cooldowns() {
@@ -189,6 +192,8 @@ export class Router {
         log.info('health_check_target', {...base, status: 'success', duration_ms: latency});
         return {...base, ok: true, latency_ms: latency, usage};
       } catch (raw) {
+        // Memory/budget failures while settling are not provider failures.
+        if (raw instanceof ToolError) throw raw;
         const error = toProviderError(raw, target);
         const latency = this.clock() - started;
         await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
@@ -221,7 +226,12 @@ export class Router {
   async verifyModel({target, timeout_ms = 15_000, max_output_tokens = 8, request_id} = {}) {
     let resolved;
     try { resolved = parseTarget(String(target || ''), this.registry); } catch { throw new ToolError('target_not_allowed', 'Requested target is not a registered provider'); }
-    if (!isEligible(resolved, this.cfg)) throw new ToolError('target_not_allowed', 'Target is disabled, incomplete or disallowed by the cost policy');
+    resolved = withRotationOptIn(resolved, this.cfg);
+    if (!isEligible(resolved, this.cfg)) throw new ToolError('target_not_allowed', 'Target is disabled, incomplete or disallowed by the cost policy', {reason: ineligibleReason(resolved, this.cfg), target: targetKey(resolved)});
+    const rotationTarget = this.targets().some(t => targetKey(t) === targetKey(resolved));
+    if (!rotationTarget && !modelAllowed({...resolved}, {...this.cfg, rotation: []})) {
+      throw new ToolError('target_not_allowed', 'Only rotation targets or provider default models can be verified unless DZ23_ALLOW_PAID=true', {reason: 'model_not_allowed', target: targetKey(resolved)});
+    }
     const messages = [{role: 'user', content: 'Reply with the single word OK.'}];
     const admission = await this.budget.admit({target: resolved, messages, maxOutputTokens: max_output_tokens, scope: 'system'});
     if (admission.denied) {
@@ -263,14 +273,15 @@ export class Router {
   resolvePreferred(target) {
     if (!target || target === 'auto') return [];
     let parsed;
-    try { parsed = parseTarget(target, this.registry); } catch { throw new ToolError('target_not_allowed', 'Requested target is not a registered provider'); }
+    try { parsed = withRotationOptIn(parseTarget(target, this.registry), this.cfg); } catch { throw new ToolError('target_not_allowed', 'Requested target is not a registered provider', {reason: 'unknown_provider'}); }
     const inRotation = !this.cfg.rotation?.length || this.targets().some(t => targetKey(t) === targetKey(parsed));
-    if (!isEligible(parsed, this.cfg) || !inRotation) throw new ToolError('target_not_allowed', 'Requested target is disabled, incomplete or disallowed by the cost/rotation policy');
+    const reason = ineligibleReason(parsed, this.cfg) || (inRotation ? null : 'not_in_rotation') || (modelAllowed(parsed, this.cfg) ? null : 'model_not_allowed');
+    if (reason) throw new ToolError('target_not_allowed', 'Requested target is disabled, incomplete or disallowed by the cost/rotation policy', {reason, target: targetKey(parsed)});
     return [parsed];
   }
 
-  async contextFor(projectId, missionId) {
-    const bundle = await this.memory.contextBundleDetailed(projectId, missionId, this.cfg.maxContextChars);
+  async contextFor(projectId, missionId, options = {}) {
+    const bundle = await this.memory.contextBundleDetailed(projectId, missionId, this.cfg.maxContextChars, options);
     for (const section of bundle.truncated_sections) this.metrics?.increment('context_truncations_total', {section});
     return bundle.text;
   }
@@ -331,12 +342,13 @@ export class Router {
     }
   }
 
-  async delegate({project_id = 'default', mission_id = crypto.randomUUID(), goal, prompt, role = 'worker', target = 'auto', metadata = {}, request_id} = {}) {
+  async delegate({project_id = 'default', mission_id = crypto.randomUUID(), goal, prompt, role = 'worker', target = 'auto', metadata = {}, request_id, independent = false} = {}) {
     if (!goal && !prompt) throw new ToolError('invalid_request', 'goal or prompt is required');
     assertRole(role);
     const preferred = this.resolvePreferred(target);
     const log = this.logger.child({request_id, project_id, mission_id, role});
-    await this.ensureMission(project_id, mission_id, goal || prompt);
+    // Only an explicit goal is recorded; prompts never overwrite harness-authored mission fields.
+    await this.ensureMission(project_id, mission_id, goal || '');
     await this.memory.appendEvent(project_id, mission_id, 'delegation_started', {role, target, metadata, request_id});
     const candidates = [...preferred, ...this.availableTargets().filter(t => !preferred.some(p => targetKey(p) === targetKey(t)))];
     if (!candidates.length) {
@@ -345,9 +357,11 @@ export class Router {
     }
     this.metrics?.increment('delegations_total', {role});
     const assignment = prompt || goal;
+    // Independent reviewers (consensus) must not read answers other reviewers stored in the same mission.
+    const contextOptions = independent ? {exclude: ['recent_outputs']} : {};
     const attempts = [];
     const denials = [];
-    let context = await this.contextFor(project_id, mission_id);
+    let context = await this.contextFor(project_id, mission_id, contextOptions);
     for (const [index, candidate] of candidates.entries()) {
       if (index > 0 && attempts.length) {
         this.metrics?.increment('failovers_total');
@@ -365,7 +379,8 @@ export class Router {
         const agent = {id: crypto.randomUUID(), role, provider: candidate.name, model: candidate.model, started_at: new Date(outcome.startedAt).toISOString(), finished_at: isoNow(), status: 'completed'};
         await this.memory.recordAgentResult(project_id, mission_id, agent, outcome.output.content);
         await this.memory.appendEvent(project_id, mission_id, 'delegation_completed', {role, provider: candidate.name, model: candidate.model, latency_ms: outcome.latencyMs, failed_attempts: attempts.length, request_id});
-        await this.memory.checkpoint(project_id, mission_id, {next_action: 'Continue from the latest agent handoff and verify repository state before editing.'});
+        await this.memory.checkpoint(project_id, mission_id, {last_tool_handoff: {tool: 'delegate', role, provider: candidate.name, model: candidate.model, at: isoNow(),
+          hint: 'Review the latest agent output and verify repository state before editing.'}});
         return {ok: true, project_id, mission_id, role, provider: candidate.name, model: candidate.model, content: outcome.output.content, usage: outcome.usage, attempts,
           ...(denials.length ? {budget_denials: denials} : {}), ...(request_id ? {request_id} : {})};
       }
@@ -374,7 +389,7 @@ export class Router {
         await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: outcome.error.kind, request_id});
         throw new ToolError('invalid_request', 'Provider rejected the request as invalid; it was not sent to other providers', {attempts});
       }
-      context = await this.contextFor(project_id, mission_id);
+      context = await this.contextFor(project_id, mission_id, contextOptions);
     }
     if (!attempts.length && denials.length) {
       await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'budget_exceeded', request_id});
@@ -394,8 +409,8 @@ export class Router {
     const helpers = this.routingHelpers();
     const plan = planRouting({targets, count: requested, strategy: routing_strategy, minDistinctProviders: min_distinct_providers, minDistinctModels: min_distinct_models,
       strict: strict_diversity, distinctOnly: true, ...helpers});
-    await this.ensureMission(project_id, mission_id, prompt);
-    const settled = await Promise.allSettled(plan.assignments.map(target => this.delegate({project_id, mission_id, prompt, role: 'reviewer', target: targetKey(target), request_id})));
+    await this.ensureMission(project_id, mission_id, '');
+    const settled = await Promise.allSettled(plan.assignments.map(target => this.delegate({project_id, mission_id, prompt, role: 'reviewer', target: targetKey(target), request_id, independent: true})));
     const responses = settled.map((s, i) => s.status === 'fulfilled'
       ? {ok: true, provider: s.value.provider, model: s.value.model, content: s.value.content, usage: s.value.usage, attempts: s.value.attempts}
       : {ok: false, provider: plan.assignments[i].name, model: plan.assignments[i].model, ...failureSummary(s.reason)});
@@ -429,13 +444,16 @@ export class Router {
     if (!targets.length) throw new ToolError('no_providers', 'No configured providers');
     const log = this.logger.child({request_id, project_id, mission_id});
     const started = this.clock();
-    const requested = Math.max(1, Math.min(max_agents || this.cfg.maxConcurrency, this.cfg.maxConcurrency, 7));
+    // Without max_agents, run one worker per requested role (capped), not the concurrency ceiling.
+    const requested = Math.max(1, Math.min(max_agents || roles.length, this.cfg.maxConcurrency || 7, 7));
     const selected = Array.from({length: requested}, (_, i) => roles[i % roles.length]);
     const helpers = this.routingHelpers();
     const plan = planRouting({targets, count: selected.length, strategy: routing_strategy, minDistinctProviders: min_distinct_providers,
       minDistinctModels: min_distinct_models, strict: strict_diversity, ...helpers});
     log.info('swarm_started', {workers: selected.length, requested_strategy: plan.routing.requested_strategy, effective_strategy: plan.routing.effective_strategy});
-    await this.memory.updateMission(project_id, mission_id, {active_tasks: selected.map((role, i) => ({id: `${role}-${i + 1}`, role, status: 'running'}))});
+    // Swarm bookkeeping lives in its own fields, never in harness-authored task lists.
+    await this.memory.mutateMission(project_id, mission_id, current => ({...current, sequence: (current.sequence || 0) + 1, updated_at: isoNow(),
+      swarm_run: {status: 'running', started_at: isoNow(), roles: selected, ...(request_id ? {request_id} : {})}}));
     // Each worker starts on its planned target; delegate() handles ordered failover and
     // the shared limiter enforces total and per-target in-flight call limits.
     const workers = selected.map((role, i) => this.delegate({project_id, mission_id, goal, role, request_id, target: targetKey(plan.assignments[i]), metadata: {worker_index: i + 1},
@@ -447,9 +465,8 @@ export class Router {
     const outputs = settled.map((s, i) => s.status === 'fulfilled' ? s.value : {ok: false, role: selected[i], ...failureSummary(s.reason)});
     const okRoles = outputs.filter(x => x.ok).map(x => x.role);
     const failed = outputs.filter(x => !x.ok).map(x => ({role: x.role, error: x.error}));
-    const current = await this.memory.getMission(project_id, mission_id);
-    await this.memory.updateMission(project_id, mission_id, {active_tasks: [], completed_tasks: uniq([...(current.completed_tasks || []), ...okRoles]),
-      blocked_tasks: [...(current.blocked_tasks || []), ...failed], swarm_last_run: {at: isoNow(), roles: selected, count: selected.length}});
+    await this.memory.mutateMission(project_id, mission_id, current => ({...current, sequence: (current.sequence || 0) + 1, updated_at: isoNow(), swarm_run: null,
+      swarm_last_run: {at: isoNow(), roles: selected, count: selected.length, completed_roles: uniq(okRoles), failed, ...(request_id ? {request_id} : {})}}));
     let reviewerTarget = 'auto';
     let reviewer = null;
     if (avoid_reviewer_target && outputs.some(x => x.ok)) {
@@ -470,7 +487,8 @@ export class Router {
         integration = {ok: false, ...failureSummary(error)};
       }
     }
-    await this.memory.checkpoint(project_id, mission_id, {status: failed.length ? 'partial' : 'active', next_action: 'Harness should inspect working tree/tests, then execute the reviewer continuation plan.'});
+    await this.memory.checkpoint(project_id, mission_id, {last_tool_handoff: {tool: 'swarm_run', at: isoNow(), outcome: failed.length ? 'partial' : 'complete',
+      hint: 'Inspect the working tree and tests, then decide whether to apply the reviewer continuation plan.'}});
     log.info('swarm_completed', {workers_ok: okRoles.length, workers_failed: failed.length, integration_ok: Boolean(integration?.ok), duration_ms: this.clock() - started});
     const routing = observeRouting(plan.routing, outputs);
     if (reviewer) routing.reviewer = {...reviewer, ...(integration?.ok ? {provider: integration.provider, model: integration.model} : {})};

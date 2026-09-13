@@ -5,10 +5,16 @@
 Execute na pasta de instalação (`node src/index.js <comando>`) ou pelo binário `dz23-subagents`.
 Todos os comandos aceitam `--json`. Códigos de saída: `0` ok, `1` problemas encontrados,
 `2` uso incorreto, `78` configuração inválida. Nenhum comando imprime valores de segredo.
+Com `--json`, erros também saem em stdout como `{"error": {"code", "message"}}`.
+
+Sem argumentos (ou apenas `--stdio`/`--http`) o binário inicia o servidor; qualquer outro argumento
+é um comando, então um erro de digitação falha com código 2 em vez de abrir o servidor stdio. O
+servidor recusa iniciar (código 78) quando `config validate` aponta erro, por exemplo booleano
+inválido ou `DZ23_ROUTING_POLICY` desconhecida.
 
 | Comando | O que faz | Rede / custo |
 | --- | --- | --- |
-| `doctor` | Node, configuração, escrita no estado, rotação, HTTP, orçamento, integridade da memória | nenhuma |
+| `doctor` | Node, configuração, escrita no estado, rotação (falha sem alvos elegíveis), HTTP, orçamento, integridade da memória (falha com registros corrompidos) | nenhuma |
 | `config validate` | Resumo efetivo e problemas de configuração | nenhuma |
 | `providers` | Inventário com status de catálogo/verificação persistido | nenhuma |
 | `health --yes` | Uma geração por alvo elegível; sem `--yes` recusa com código 2 | **pode cobrar** |
@@ -16,7 +22,7 @@ Todos os comandos aceitam `--json`. Códigos de saída: `0` ok, `1` problemas en
 | `missions show <project> <mission>` | Estado, uso e eventos recentes | nenhuma |
 | `memory repair [--project <id>]` | Inspeção e plano (dry run) | nenhuma |
 | `memory repair --apply --yes` | Aplica apenas reparos seguros | nenhuma |
-| `token hash` | SHA-256 de um token lido do stdin, para `DZ23_MCP_TOKENS_FILE` | nenhuma |
+| `token hash` | SHA-256 de um token lido do stdin (mínimo 32 caracteres), para `DZ23_MCP_TOKENS_FILE` | nenhuma |
 
 ```bash
 printf %s "$TOKEN" | node src/index.js token hash
@@ -60,17 +66,27 @@ Buckets em memória por processo, recarregados continuamente na janela
 - concorrência de ferramentas não leves por identidade: `DZ23_RATE_LIMIT_CONCURRENT` (4);
 - pesos (`DZ23_RATE_LIMIT_WEIGHTS`): `light:1`, `discovery:3`, `moderate:5` (delegate),
   `billable:10` (health_check, verify_model), `expensive:15` (consensus), `very_expensive:30` (swarm_run);
-- falhas de autenticação consomem pontos do endereço remoto e passam a receber 429.
+- só tentativas com token inválido consomem pontos do endereço remoto (peso `moderate`); esgotado o
+  bucket, novas tentativas inválidas recebem 429. Um token válido nunca é bloqueado pelas falhas de
+  outro cliente no mesmo endereço.
 
 Excesso retorna 429 com `Retry-After` antes de qualquer chamada a provider. A identidade é
 `token:<id>` com token ou `ip:<endereço>` sem token (loopback). Um peso maior que a capacidade
 nunca é admitido; `config validate` acusa esse erro.
 
+Quando o número de chaves chega ao limite, buckets totalmente recarregados são descartados primeiro;
+buckets esgotados são mantidos, para que inundar chaves novas não zere o próprio limite.
+
+O Host é conferido pelo header `Host`, nunca pela URL absoluta da requisição. Requisições de
+navegador marcadas como cross-site (`Sec-Fetch-Site`) sem `Origin` permitida recebem 403.
+Ferramentas faturáveis só existem por `POST` (`/api/health` exige `{"confirm_billable": true}`),
+então um link ou imagem em outra página não dispara cobrança.
+
 ## Orçamento
 
 | Variável | Efeito |
 | --- | --- |
-| `DZ23_COST_POLICY` | `allow_unknown_cost` (padrão) ou `deny_unknown_cost` |
+| `DZ23_COST_POLICY` | `allow_unknown_cost` ou `deny_unknown_cost`. Padrão: `deny_unknown_cost` quando algum limite de custo está definido, senão `allow_unknown_cost` |
 | `DZ23_PRICES_FILE` / `DZ23_PRICES` | Tabela `provider:model` ou `provider:*` com preço por milhão de tokens |
 | `DZ23_MAX_CALL_COST_USD` | Custo estimado máximo por chamada; o alvo é pulado |
 | `DZ23_MAX_MISSION_COST_USD`, `DZ23_MAX_PROJECT_COST_USD`, `DZ23_MAX_DAILY_COST_USD` | Custo acumulado conhecido |
@@ -85,14 +101,17 @@ alvo (`unknown_cost`, `call_cost_limit`, `*_cost_limit`) fazem failover para out
 Cada chamada gera um registro com `input_tokens`, `output_tokens`, `total_tokens`,
 `token_source` (`provider`, `estimated`, `none`), `estimated_cost_usd` e `cost_source`
 (`provider_usage`, `configured_price`, `unknown`). Preços nunca são inventados: sem tabela, o custo
-é `null`. Com limites de custo, prefira `deny_unknown_cost`, pois chamadas de custo desconhecido não
-entram na soma. `config/examples/prices.example.json` traz apenas servidores locais com custo zero;
+é `null`. Com limites de custo o padrão já é `deny_unknown_cost`, pois chamadas de custo desconhecido
+não entram na soma; optar explicitamente por `allow_unknown_cost` faz `doctor` avisar. `config/examples/prices.example.json` traz apenas servidores locais com custo zero;
 preços de nuvem devem vir das páginas oficiais dos fornecedores e ser revisados periodicamente.
 
 ## Memory locks
 
-Um `lock_timeout` informa idade, motivo e dono (`pid`, `hostname`). O servidor remove sozinho
-apenas locks velhos cujo dono comprovadamente terminou neste host. Para os demais:
+Um `lock_timeout` informa idade e motivo. `pid` e `hostname` do dono aparecem apenas em
+`memory repair`, para o operador, e nunca para clientes da ferramenta. O servidor remove sozinho
+apenas locks velhos cujo dono comprovadamente terminou neste host (processo inexistente ou lock
+criado antes do último boot) ou, sem metadados de dono, com mais que o dobro de
+`DZ23_LOCK_STALE_MS`. Para os demais:
 
 1. Confirme que nenhum processo do DZ23 Subagents está escrevendo nesse diretório de estado
    (inclusive em outras máquinas que montem o mesmo volume).
@@ -104,24 +123,37 @@ apenas locks velhos cujo dono comprovadamente terminou neste host. Para os demai
 `memory repair --apply --yes` também restaura `state.json` corrompido a partir do checkpoint
 válido mais recente (o arquivo corrompido é renomeado para `state.json.corrupt-<data>`) e fecha
 linhas incompletas do journal. `project.json` corrompido e arquivos `*.tmp` exigem ação manual.
+Registros gravados por uma versão mais nova (schema maior) nunca são restaurados de checkpoint:
+atualize o servidor.
+
+Limites de tamanho: `DZ23_MAX_CHECKPOINT_LIST_ITEMS` (500 itens por lista) e
+`DZ23_MAX_STATE_BYTES` (4 MiB por missão).
 
 ## Shutdown
 
 `SIGINT`/`SIGTERM` param de aceitar requisições, aguardam as em andamento por
 `DZ23_SHUTDOWN_GRACE_MS` (10 s) e então encerram. Em stdio, aguarda a mensagem em processamento.
 
-## Atualizando de 2.2.x
+Mensagens stdio são processadas uma por vez, na ordem de chegada: uma chamada longa (por exemplo
+`swarm_run`) atrasa as seguintes. Use HTTP quando precisar de chamadas simultâneas.
+
+## Atualizando de 2.2.x para 3.0.0
 
 1. Faça backup de `.env` e do diretório de estado.
 2. Leia as mudanças incompatíveis em `CHANGELOG.md`.
 3. Rode `node src/index.js doctor` e `node src/index.js config validate`.
 4. A memória 2.2.x é migrada na leitura e gravada como schema 2 na próxima escrita;
    versões anteriores do servidor não reconhecem o schema 2.
+5. Provedores locais (`custom`, `lmstudio`, `vllm`) só ficam ativos com `<PREFIXO>_BASE_URL`,
+   `<PREFIXO>_MODEL` ou chave definidos; antes os endereços padrão bastavam.
+6. Clientes REST: `health_check` passou a `POST /api/health` com `confirm_billable`, e detalhes de
+   erro ficam em `error.details`.
 
 ## Docker
 
 `docker compose up --build -d` com `.env` privado contendo o token (ou secret montado com
 `DZ23_MCP_TOKEN_FILE`, nunca os dois). O container roda como usuário não-root com código somente
 leitura, sistema de arquivos read-only, volume `/state`, limites de memória/CPU/processos e
-healthcheck autenticado. A porta é publicada só em `127.0.0.1`. Não use `docker compose down -v`
+healthcheck autenticado (com apenas tokens com escopo, aponte `DZ23_HEALTHCHECK_TOKEN_FILE` para um
+deles; `/healthz` não exige escopo). A porta é publicada só em `127.0.0.1`. Não use `docker compose down -v`
 em atualizações: isso apaga a memória. Docker não foi executado no ambiente desta entrega.

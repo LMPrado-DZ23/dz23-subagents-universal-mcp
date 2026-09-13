@@ -20,7 +20,7 @@ resultados, logs, memória ou erros.
 ## Fluxo de uma chamada
 
 1. O transporte gera ou aceita `request_id`, decodifica JSON-RPC e aplica autenticação,
-   Host/Origin e rate limit (HTTP).
+   Host/Origin/cross-site e rate limit (HTTP; falhas de autenticação limitadas por endereço).
 2. `mcp.js` valida os argumentos com o schema publicado e confere escopos.
 3. `core.js` resolve alvos elegíveis (`DZ23_ROTATION`, custo, cooldown) e planeja o roteamento.
 4. Para cada tentativa: o orçamento admite ou nega; o limiter controla concorrência por
@@ -29,7 +29,8 @@ resultados, logs, memória ou erros.
    repetem no mesmo alvo, com backoff e `Retry-After` limitado. `invalid_request` encerra sem
    failover; os demais tipos fazem failover e aplicam cooldown por tipo.
 6. O uso é liquidado (tokens reportados ou estimados, custo por preço configurado ou reportado),
-   a resposta é gravada na memória e um checkpoint é criado.
+   a resposta é gravada na memória e um checkpoint registra `last_tool_handoff`, sem alterar
+   `status`, `next_action` ou `goal`, que pertencem ao harness.
 
 `swarm_run` distribui workers conforme a estratégia (padrão `first`, compatível com 2.2.5),
 aguarda todos e chama um revisor integrador. `consensus` usa alvos distintos. Nada disso
@@ -80,6 +81,9 @@ dado não confiável e pode ser truncado; não há recuperação semântica ou v
   deixar atualização parcial (detectável por `memory repair`). Locks em sistemas de arquivos de rede
   não são garantidos. Não há criptografia em repouso, SQLite ou WAL.
 - HTTP é JSON sem SSE, sessões retomáveis, OAuth ou notificações do servidor.
+- stdio processa uma mensagem por vez, em ordem: chamadas longas atrasam as seguintes.
+- Mapas em memória por alvo e séries de métricas são limitados, para que nomes de modelo
+  arbitrários não façam a memória crescer sem limite.
 
 Não prometer: conformidade MCP completa, compatibilidade com todos os hosts, uso gratuito,
 conclusão autônoma de projetos, operação 24/7 sem supervisão ou qualidade medida por benchmarks.

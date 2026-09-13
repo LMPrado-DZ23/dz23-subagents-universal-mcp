@@ -32,10 +32,16 @@ function boundedInt(env, issues, name, fallback, min, max) {
   return n;
 }
 
-function flag(env, name, fallback = false) {
+/** Boolean setting: only true/false are accepted; anything else keeps the safe default and is reported. */
+function flag(env, name, fallback = false, issues) {
   const raw = env[name];
   if (raw === undefined || raw === '') return fallback;
-  return String(raw).toLowerCase() === 'true';
+  const value = String(raw).toLowerCase();
+  if (value !== 'true' && value !== 'false') {
+    issues?.push({level: 'error', variable: name, message: 'must be true or false'});
+    return fallback;
+  }
+  return value === 'true';
 }
 
 function list(env, name) {
@@ -88,34 +94,41 @@ function loadPrices(env) {
 }
 
 export function budgetConfig(env = process.env) {
-  const policy = env.DZ23_COST_POLICY || 'allow_unknown_cost';
-  if (!COST_POLICIES.includes(policy)) throw new ConfigError(`DZ23_COST_POLICY must be one of: ${COST_POLICIES.join(', ')}`);
-  return {
+  const limits = {
     missionCostUsd: money(env, 'DZ23_MAX_MISSION_COST_USD'),
     projectCostUsd: money(env, 'DZ23_MAX_PROJECT_COST_USD'),
     dailyCostUsd: money(env, 'DZ23_MAX_DAILY_COST_USD'),
     callCostUsd: money(env, 'DZ23_MAX_CALL_COST_USD'),
     missionTokens: optionalLimit(env, 'DZ23_MAX_MISSION_TOKENS', 1_000_000_000),
     missionCalls: optionalLimit(env, 'DZ23_MAX_MISSION_CALLS', 1_000_000),
-    inputTokens: optionalLimit(env, 'DZ23_MAX_INPUT_TOKENS', 10_000_000),
-    policy,
-    prices: loadPrices(env)
+    inputTokens: optionalLimit(env, 'DZ23_MAX_INPUT_TOKENS', 10_000_000)
   };
+  const costLimits = [limits.missionCostUsd, limits.projectCostUsd, limits.dailyCostUsd, limits.callCostUsd].some(value => value !== null);
+  // With cost limits, unknown-cost calls would escape them: fail closed unless DZ23_COST_POLICY opts in.
+  const policy = env.DZ23_COST_POLICY || (costLimits ? 'deny_unknown_cost' : 'allow_unknown_cost');
+  if (!COST_POLICIES.includes(policy)) throw new ConfigError(`DZ23_COST_POLICY must be one of: ${COST_POLICIES.join(', ')}`);
+  return {...limits, policy, prices: loadPrices(env)};
 }
 
 export function config(env = process.env) {
   const issues = [];
   const int = (name, fallback, min, max) => boundedInt(env, issues, name, fallback, min, max);
+  const bool = (name, fallback = false) => flag(env, name, fallback, issues);
   const auth = loadMcpToken(env);
   const scoped = loadScopedTokens(env);
   for (const message of [...auth.warnings, ...scoped.warnings]) issues.push({level: 'warn', variable: 'auth', message});
+  if (scoped.mode === 'scoped' && auth.token) {
+    issues.push({level: 'warn', variable: 'DZ23_MCP_TOKEN', message: 'the primary token keeps every scope in scoped mode; remove it to rely only on scoped tokens'});
+  }
   const toolArgumentErrors = env.DZ23_TOOL_ARGUMENT_ERRORS || 'auto';
   if (!TOOL_ARGUMENT_ERROR_MODES.includes(toolArgumentErrors)) throw new ConfigError(`DZ23_TOOL_ARGUMENT_ERRORS must be one of: ${TOOL_ARGUMENT_ERROR_MODES.join(', ')}`);
   const logLevel = env.DZ23_LOG_LEVEL || 'info';
   if (!Object.hasOwn(LOG_LEVELS, logLevel)) throw new ConfigError(`DZ23_LOG_LEVEL must be one of: ${Object.keys(LOG_LEVELS).join(', ')}`);
-  const providerTimeoutMs = Math.max(1000, intEnv('DZ23_PROVIDER_TIMEOUT_MS', 90_000, env));
+  const providerTimeoutMs = int('DZ23_PROVIDER_TIMEOUT_MS', 90_000, 1000, 600_000);
+  const routingPolicy = env.DZ23_ROUTING_POLICY || 'free-first';
+  if (!['free-first', 'rotation-order'].includes(routingPolicy)) issues.push({level: 'error', variable: 'DZ23_ROUTING_POLICY', message: 'must be free-first or rotation-order; using free-first'});
   const rateLimit = {
-    enabled: flag(env, 'DZ23_RATE_LIMIT_ENABLED', true),
+    enabled: bool('DZ23_RATE_LIMIT_ENABLED', true),
     windowMs: int('DZ23_RATE_LIMIT_WINDOW_MS', 60_000, 1000, 3_600_000),
     points: int('DZ23_RATE_LIMIT_POINTS', 120, 1, 100_000),
     toolPoints: int('DZ23_RATE_LIMIT_TOOL_POINTS', 60, 1, 100_000),
@@ -135,15 +148,15 @@ export function config(env = process.env) {
     tokenSource: auth.source,
     authMode: scoped.mode,
     scopedTokens: scoped.tokens,
-    allowHttp: flag(env, 'DZ23_ALLOW_HTTP'),
+    allowHttp: bool('DZ23_ALLOW_HTTP'),
     allowedHosts: list(env, 'DZ23_ALLOWED_HOSTS'),
     allowedOrigins: list(env, 'DZ23_ALLOWED_ORIGINS'),
-    policy: env.DZ23_ROUTING_POLICY || 'free-first',
+    policy: ['free-first', 'rotation-order'].includes(routingPolicy) ? routingPolicy : 'free-first',
     maxConcurrency: int('DZ23_MAX_CONCURRENCY', 7, 1, 8),
     maxWorkersPerTarget: int('DZ23_MAX_WORKERS_PER_TARGET', 4, 1, 7),
     maxQueue: int('DZ23_MAX_QUEUE', 32, 1, 128),
     timeoutMs: providerTimeoutMs,
-    healthTimeoutMs: Math.max(1000, intEnv('DZ23_HEALTH_TIMEOUT_MS', 15_000, env)),
+    healthTimeoutMs: int('DZ23_HEALTH_TIMEOUT_MS', 15_000, 1000, 120_000),
     maxContextChars: int('DZ23_MAX_CONTEXT_CHARS', 60_000, 10_000, 120_000),
     maxOutputTokens: int('DZ23_MAX_OUTPUT_TOKENS', 4096, 64, 4096),
     maxResponseBytes: int('DZ23_MAX_RESPONSE_BYTES', 2 * 1024 * 1024, 65_536, 4 * 1024 * 1024),
@@ -151,9 +164,11 @@ export function config(env = process.env) {
     maxAgentOutputs: int('DZ23_MAX_AGENT_OUTPUTS', 16, 1, 32),
     maxJournalBytes: int('DZ23_MAX_JOURNAL_BYTES', 1024 * 1024, 65_536, 4 * 1024 * 1024),
     maxCheckpoints: int('DZ23_MAX_CHECKPOINTS', 8, 1, 16),
+    maxStateBytes: int('DZ23_MAX_STATE_BYTES', 4 * 1024 * 1024, 262_144, 33_554_432),
+    maxListItems: int('DZ23_MAX_CHECKPOINT_LIST_ITEMS', 500, 10, 5000),
     lockTimeoutMs: int('DZ23_LOCK_TIMEOUT_MS', 20_000, 1000, 120_000),
     lockStaleMs: int('DZ23_LOCK_STALE_MS', 30_000, 5000, 3_600_000),
-    durableWrites: flag(env, 'DZ23_MEMORY_FSYNC', true),
+    durableWrites: bool('DZ23_MEMORY_FSYNC', true),
     maxStdioFrameBytes: int('DZ23_MAX_STDIO_FRAME_BYTES', 512 * 1024, 65_536, 2 * 1024 * 1024),
     maxPromptChars: int('DZ23_MAX_PROMPT_CHARS', 32_000, 1000, 200_000),
     maxGoalChars: int('DZ23_MAX_GOAL_CHARS', 8000, 500, 64_000),
@@ -162,7 +177,7 @@ export function config(env = process.env) {
     maxRetries: int('DZ23_MAX_RETRIES', 1, 0, 5),
     retryBaseDelayMs: int('DZ23_RETRY_BASE_DELAY_MS', 500, 50, 60_000),
     retryAfterCapMs: int('DZ23_RETRY_AFTER_CAP_MS', 30_000, 0, 300_000),
-    allowPaid: flag(env, 'DZ23_ALLOW_PAID'),
+    allowPaid: bool('DZ23_ALLOW_PAID'),
     rotation: list(env, 'DZ23_ROTATION'),
     rateLimit,
     http: {

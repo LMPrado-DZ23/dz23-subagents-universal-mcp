@@ -1,4 +1,6 @@
 const EWMA_ALPHA = 0.3;
+export const MAX_SERIES = 2000;
+const DROPPED = 'metrics_series_dropped_total';
 
 function seriesKey(name, labels) {
   const entries = Object.entries(labels || {}).filter(([, value]) => value !== undefined).sort(([a], [b]) => a.localeCompare(b));
@@ -19,14 +21,23 @@ export class Metrics {
     this.latency = new Map();
   }
 
+  /** Series count is bounded: labels built from caller-chosen model names cannot grow memory without limit. */
+  admit(map, key) {
+    if (map.has(key) || map.size < MAX_SERIES) return true;
+    this.counters.set(DROPPED, (this.counters.get(DROPPED) || 0) + 1);
+    return false;
+  }
+
   increment(name, labels, amount = 1) {
     const key = seriesKey(name, labels);
+    if (!this.admit(this.counters, key)) return;
     this.counters.set(key, (this.counters.get(key) || 0) + amount);
   }
 
   observe(name, value, labels) {
     if (!Number.isFinite(value)) return;
     const key = seriesKey(name, labels);
+    if (!this.admit(this.summaries, key)) return;
     const s = this.summaries.get(key) || {count: 0, sum: 0, min: Infinity, max: -Infinity};
     s.count++; s.sum += value; s.min = Math.min(s.min, value); s.max = Math.max(s.max, value);
     this.summaries.set(key, s);
@@ -39,6 +50,7 @@ export class Metrics {
   /** Exponentially weighted latency per routing target, used by latency_optimized routing. */
   recordLatency(target, ms) {
     const current = this.latency.get(target);
+    if (!this.admit(this.latency, target)) return;
     this.latency.set(target, current ? {ewma: current.ewma + EWMA_ALPHA * (ms - current.ewma), samples: current.samples + 1} : {ewma: ms, samples: 1});
   }
 

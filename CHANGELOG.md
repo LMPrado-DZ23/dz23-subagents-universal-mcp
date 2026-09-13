@@ -1,6 +1,9 @@
 # Changelog
 
-## 2.3.0 — 2026-09-13 — MCP conformance, HTTP security, observability, budgets and memory v2
+## 3.0.0 — 2026-09-13 — MCP conformance, HTTP security, observability, budgets and memory v2
+
+Versão maior porque há mudanças incompatíveis com 2.2.x. A numeração 2.3.0 foi usada apenas
+numa candidata interna, nunca publicada.
 
 ### Mudanças incompatíveis (revise antes de atualizar)
 
@@ -23,6 +26,22 @@
 - `discover_models` devolve `{id, owned_by, catalog_capabilities}` por modelo
   (campos crus do catálogo foram removidos).
 - Definir `DZ23_MCP_TOKEN` e `DZ23_MCP_TOKEN_FILE` ao mesmo tempo impede a inicialização.
+- `health_check` exige `confirm_billable: true`; na REST é `POST /api/health` (`GET` responde 405).
+- Erros REST e de transporte HTTP usam `{error: {code, message, request_id, details}}`; campos como
+  `error.field` passaram para `error.details`.
+- `memory_checkpoint` responde com um resumo em vez do estado completo; listas são limitadas a 500
+  itens e o estado a 4 MiB (`DZ23_MAX_CHECKPOINT_LIST_ITEMS`, `DZ23_MAX_STATE_BYTES`).
+- `delegate`, `consensus` e `swarm_run` não sobrescrevem mais `status`, `next_action` ou `goal`;
+  gravam `last_tool_handoff`. O swarm não preenche mais listas de tarefas da missão.
+- Provedores locais só ficam ativos com configuração explícita (URL, modelo ou chave).
+- Sem `DZ23_ROTATION`, alvos explícitos com modelo diferente do padrão do provider exigem
+  `DZ23_ALLOW_PAID=true`; `verify_model` segue a mesma regra.
+- Com limites de custo e sem `DZ23_COST_POLICY`, o padrão é `deny_unknown_cost`.
+- Erros de configuração (booleano inválido, política de roteamento desconhecida) impedem o servidor
+  de iniciar, com código 78.
+- Argumentos que não sejam `--stdio`/`--http` são comandos da CLI; comando desconhecido sai com 2.
+- `swarm_run` sem `max_agents` usa no máximo `DZ23_MAX_CONCURRENCY` workers.
+- `token hash` recusa tokens com menos de 32 caracteres.
 
 ### MCP e JSON-RPC
 - Validador de JSON Schema sem dependências; keywords não suportadas são recusadas no registro.
@@ -71,6 +90,29 @@
 - CI com lint, testes de contrato, cobertura (relatório) e auditoria dos arquivos públicos.
 - Docker com código somente leitura para o usuário não-root, volume de estado, healthcheck
   com token por arquivo e compose com `read_only`, limites e secret opcional.
+
+### Correções da auditoria independente (arquitetura, segurança e produto)
+- Checkpoints concorrentes perdiam itens: o merge agora acontece dentro do lock da missão.
+- Falhas de autenticação de um endereço bloqueavam também tokens válidos: só tentativas inválidas
+  são limitadas.
+- Chamadas de ferramenta sobrescreviam o handoff do harness (`status`, `next_action`, `goal`).
+- Comando desconhecido iniciava o servidor stdio em silêncio.
+- `GET /api/health` permitia a uma página cross-site disparar chamadas faturáveis num servidor
+  loopback sem token; o Host era lido da URL absoluta em vez do header.
+- Modelos arbitrários em providers de categoria mista contornavam a política de pagos.
+- Remoção de lock sem dono podia apagar um lock recriado; locks anteriores ao boot ficavam presos;
+  `owner.json` é gravado de forma atômica; erros de lock não expõem `pid`/`hostname`.
+- stdio acumulava frames grandes em memória antes de rejeitá-los.
+- `memory repair` propunha restaurar checkpoint antigo sobre registro de schema mais novo.
+- Liquidação de uso marcava como gravada uma escrita que falhou.
+- Revisores do `consensus` viam as respostas uns dos outros no contexto.
+- Fila cheia virava `internal_error`; agora é `queue_full` (503).
+- Rate limiter descartava buckets esgotados sob pressão de chaves; mapas por alvo e séries de
+  métricas agora são limitados.
+- `doctor` passava sem alvos elegíveis ou com registros corrompidos; booleanos, timeouts e política
+  de roteamento inválidos eram aceitos em silêncio.
+- IDs que diferem só por maiúsculas/minúsculas colidiam em Windows/macOS.
+- Guard de publicação passa a recusar `credentials*.json`, `secrets*.json` e `token*.txt`.
 
 ## 2.2.5 — 2026-09-12 — hardening de orquestração e limites
 
