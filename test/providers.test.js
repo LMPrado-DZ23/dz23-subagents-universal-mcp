@@ -16,8 +16,9 @@ test('Anthropic native Messages API adapter maps system/user and output', async(
 });
 
 test('quota classification handles rate and credit exhaustion',()=>{
-  assert.equal(classifyHttpFailure(429,'rate limit'),'quota_or_rate_limit');
-  assert.equal(classifyHttpFailure(400,'insufficient credit'),'quota_or_rate_limit');
+  // v2.3.0 taxonomy: rate limits are retryable, credit/billing problems are not.
+  assert.equal(classifyHttpFailure(429,'rate limit'),'rate_limited');
+  assert.equal(classifyHttpFailure(400,'insufficient credit'),'billing_required');
 });
 
 test('provider response body is bounded', async()=>{

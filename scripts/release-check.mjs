@@ -11,17 +11,9 @@ export function forbiddenPath(name) {
     parts.some(part => /^\.env(?:\..*)?$/.test(part) && part !== '.env.example') ||
     /\.(?:pem|key|p12|pfx|log|tmp|bak|zip|mcpb)$/i.test(name);
 }
-export function secretDetected(text) {
-  // Heuristic release guard, not a complete DLP/credential validity test.
-  const rules = [
-    /sk-(?:proj-|ant-api\d+-|or-v\d+-)?[A-Za-z0-9_-]{24,}/,
-    /(?:gh[pousr]_|github_pat_|hf_|gsk_|nvapi-|xai-|cfat_)[A-Za-z0-9_-]{20,}/,
-    /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
-    /AKIA[A-Z0-9]{16}/,
-    /AIza[A-Za-z0-9_-]{30,}/
-  ];
-  return rules.some(rule => rule.test(text));
-}
+// Heuristic release guard shared with runtime log redaction; not a complete DLP test.
+import {secretDetected} from '../src/redact.js';
+export {secretDetected};
 export function checkRelease(base = root) {
   const manifest = JSON.parse(fs.readFileSync(path.join(base,'PUBLIC_FILES.json'),'utf8'));
   const version = JSON.parse(fs.readFileSync(path.join(base,'package.json'),'utf8')).version;

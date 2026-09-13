@@ -107,6 +107,7 @@ test('tool failures are isError results; unexpected failures hide internals', as
   const failed = (await process(call(1, 'delegate', {project_id: 'p', mission_id: 'm', prompt: 'x'}), {requestId: 'req-fail-0001'})).response;
   assert.equal(failed.result.isError, true);
   assert.equal(failed.result.structuredContent.error.code, 'all_providers_failed');
+  assert.equal(JSON.stringify(failed).includes(SECRET), false, 'adapter messages must not be echoed');
   router.listModels = () => { throw new TypeError(`boom ${SECRET}`); };
   const internal = (await process(call(2, 'list_models', {}), {requestId: 'req-internal-1'})).response;
   assert.deepEqual(internal.error, {code: -32603, message: 'Internal error', data: {request_id: 'req-internal-1'}});

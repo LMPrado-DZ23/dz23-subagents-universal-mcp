@@ -4,7 +4,8 @@ import {
 } from './constants.js';
 import {validate, ValidationError, isPlainObject} from './schema.js';
 import {buildTools, toolLimits, TOOL_POLICIES} from './tools.js';
-import {RpcError, ToolError, ForbiddenError, safeText} from './errors.js';
+import {RpcError, ToolError, ForbiddenError, RateLimitError, safeText} from './errors.js';
+import {nullLogger} from './logger.js';
 
 const DATE_VERSION = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -85,29 +86,52 @@ export function createMcpHandler(router, memory, options = {}) {
   const byName = new Map(tools.map(tool => [tool.name, tool]));
   const runners = toolRunner(router, memory);
   const argumentErrorMode = options.argumentErrors || router?.cfg?.toolArgumentErrors || 'auto';
+  const logger = options.logger || nullLogger;
+  const metrics = options.metrics || null;
+
+  function parseArguments(tool, rawArgs) {
+    try {
+      if (rawArgs !== undefined && !isPlainObject(rawArgs)) throw new ValidationError('arguments', 'must be an object');
+      return validate(tool.inputSchema, rawArgs ?? {});
+    } catch (error) {
+      if (!(error instanceof ValidationError)) throw error;
+      throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Invalid tool arguments', {field: error.field, reason: error.reason});
+    }
+  }
 
   /** Validates, authorizes, rate-limits and executes one tool. Used by MCP and REST. */
   async function executeTool(name, rawArgs, ctx = {}) {
     const tool = typeof name === 'string' ? byName.get(name) : undefined;
     if (!tool) throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Unknown tool', {tool: safeText(name, 64).replace(/[^A-Za-z0-9_.-]/g, '?')});
-    let args;
+    const started = Date.now();
+    let status = 'error';
+    let errorCode;
     try {
-      if (rawArgs !== undefined && !isPlainObject(rawArgs)) throw new ValidationError('arguments', 'must be an object');
-      args = validate(tool.inputSchema, rawArgs ?? {});
+      let args;
+      try { args = parseArguments(tool, rawArgs); } catch (error) { status = 'invalid_arguments'; throw error; }
+      const policy = TOOL_POLICIES[tool.name];
+      authorize(ctx, policy);
+      const release = ctx.beforeToolCall ? await ctx.beforeToolCall(tool.name, policy) : undefined;
+      try {
+        const value = await runners[tool.name](args, ctx);
+        status = 'ok';
+        return {ok: true, value};
+      } catch (error) {
+        if (!(error instanceof ToolError)) throw error;
+        status = 'tool_error';
+        errorCode = error.code;
+        return {ok: false, error};
+      } finally {
+        if (typeof release === 'function') release();
+      }
     } catch (error) {
-      if (!(error instanceof ValidationError)) throw error;
-      throw new RpcError(RPC_ERRORS.INVALID_PARAMS, 'Invalid tool arguments', {field: error.field, reason: error.reason});
-    }
-    const policy = TOOL_POLICIES[tool.name];
-    authorize(ctx, policy);
-    const release = ctx.beforeToolCall ? await ctx.beforeToolCall(tool.name, policy) : undefined;
-    try {
-      return {ok: true, value: await runners[tool.name](args, ctx)};
-    } catch (error) {
-      if (error instanceof ToolError) return {ok: false, error};
+      if (error instanceof ForbiddenError) status = 'forbidden';
+      else if (error instanceof RateLimitError) status = 'rate_limited';
       throw error;
     } finally {
-      if (typeof release === 'function') release();
+      const fields = {request_id: ctx.requestId, tool: tool.name, transport: ctx.transport, identity: ctx.identity, duration_ms: Date.now() - started, status, error_code: errorCode};
+      if (status === 'ok') logger.info('tool_call_completed', fields); else logger.warn('tool_call_completed', fields);
+      metrics?.increment('tool_calls_total', {tool: tool.name, status});
     }
   }
 

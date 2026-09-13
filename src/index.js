@@ -8,6 +8,9 @@ import {createRpcProcessor} from './rpc.js';
 import {startHttp} from './http.js';
 import {startStdio} from './stdio.js';
 import {ConfigError} from './errors.js';
+import {createLogger} from './logger.js';
+import {Metrics} from './metrics.js';
+import {SERVER_VERSION, SUPPORTED_PROTOCOL_VERSIONS} from './constants.js';
 
 const EX_CONFIG = 78;
 
@@ -18,39 +21,45 @@ try {
   cfg = config();
 } catch (error) {
   if (!(error instanceof ConfigError)) throw error;
-  console.error(`Configuration error: ${error.message}`);
+  process.stderr.write(`${JSON.stringify({ts: new Date().toISOString(), level: 'error', event: 'config_invalid', message: error.message})}\n`);
   process.exit(EX_CONFIG);
 }
-for (const issue of cfg.configIssues) console.error(`Configuration ${issue.level}: ${issue.variable} ${issue.message}`);
 
+const logger = createLogger({level: cfg.logLevel});
+logger.addSecrets([cfg.token]);
+for (const issue of cfg.configIssues) logger[issue.level === 'error' ? 'error' : 'warn']('config_issue', issue);
+const metrics = new Metrics();
 const memory = new ProjectMemory(cfg.stateDir, cfg);
-const router = new Router(cfg, memory);
-const handler = createMcpHandler(router, memory);
+const router = new Router(cfg, memory, {logger, metrics});
+const handler = createMcpHandler(router, memory, {logger, metrics});
 let server = null;
 let stdio = null;
 
 if (process.argv.includes('--http')) {
   if (!cfg.allowHttp) {
-    console.error('HTTP mode is disabled; set DZ23_ALLOW_HTTP=true only after configuring authentication');
+    logger.error('http_disabled', {message: 'set DZ23_ALLOW_HTTP=true only after configuring authentication'});
     process.exit(EX_CONFIG);
   }
-  server = await startHttp(cfg, router, memory, handler);
-  console.error(`DZ23 Subagents HTTP MCP listening on http://${cfg.host}:${server.address().port}`);
+  server = await startHttp(cfg, router, memory, handler, {logger, metrics});
+  metrics.gauge('http_inflight', () => server.inflight());
+  logger.info('server_started', {transport: 'http', host: cfg.host, port: server.address().port, version: SERVER_VERSION, protocol_versions: SUPPORTED_PROTOCOL_VERSIONS, auth_mode: cfg.authMode});
 } else {
-  stdio = startStdio({processMessage: createRpcProcessor(handler), maxFrameBytes: cfg.maxStdioFrameBytes});
+  stdio = startStdio({processMessage: createRpcProcessor(handler, {logger}), maxFrameBytes: cfg.maxStdioFrameBytes, logger});
+  logger.info('server_started', {transport: 'stdio', version: SERVER_VERSION, protocol_versions: SUPPORTED_PROTOCOL_VERSIONS});
 }
 
 let stopping = false;
 async function shutdown(signal) {
   if (stopping) return;
   stopping = true;
-  console.error(`DZ23 Subagents received ${signal}; finishing in-flight work (grace ${cfg.shutdownGraceMs} ms)`);
+  logger.info('shutdown_started', {signal, grace_ms: cfg.shutdownGraceMs});
   const hardStop = setTimeout(() => process.exit(1), cfg.shutdownGraceMs + 2000);
   hardStop.unref();
   try {
     if (server) await server.shutdown(cfg.shutdownGraceMs);
     else if (stdio) await Promise.race([stdio.idle(), new Promise(resolve => setTimeout(resolve, cfg.shutdownGraceMs).unref())]);
   } finally {
+    logger.info('shutdown_completed', {signal});
     process.exit(0);
   }
 }

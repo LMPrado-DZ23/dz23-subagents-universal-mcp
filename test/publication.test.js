@@ -118,8 +118,8 @@ test('HTTP auth, origin, host, notifications, malformed JSON and methods',async 
 test('raw provider error bodies are not returned or persisted as messages',async()=>{
   const original=globalThis.fetch;const echo='sensitive-placeholder-for-test';
   try{
-    globalThis.fetch=async()=>new Response(JSON.stringify({error:`quota ${echo}`}),{status:429});
-    await assert.rejects(callOpenAICompatible(target('test'),[{role:'user',content:'hello'}]),e=>e.kind==='quota_or_rate_limit'&&!e.message.includes(echo));
+    globalThis.fetch=async()=>new Response(JSON.stringify({error:`You exceeded your current quota ${echo}`}),{status:429});
+    await assert.rejects(callOpenAICompatible(target('test'),[{role:'user',content:'hello'}]),e=>e.kind==='quota_exhausted'&&!e.message.includes(echo));
   }finally{globalThis.fetch=original;}
 });
 test('inventory capability flags describe the exposed text-only adapter',()=>{

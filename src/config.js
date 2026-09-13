@@ -1,6 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
-import {DEFAULT_COST_WEIGHTS, TOOL_ARGUMENT_ERROR_MODES} from './constants.js';
+import {DEFAULT_COST_WEIGHTS, TOOL_ARGUMENT_ERROR_MODES, LOG_LEVELS} from './constants.js';
 import {ConfigError} from './errors.js';
 import {loadMcpToken, loadScopedTokens} from './auth.js';
 
@@ -62,6 +62,8 @@ export function config(env = process.env) {
   for (const message of [...auth.warnings, ...scoped.warnings]) issues.push({level: 'warn', variable: 'auth', message});
   const toolArgumentErrors = env.DZ23_TOOL_ARGUMENT_ERRORS || 'auto';
   if (!TOOL_ARGUMENT_ERROR_MODES.includes(toolArgumentErrors)) throw new ConfigError(`DZ23_TOOL_ARGUMENT_ERRORS must be one of: ${TOOL_ARGUMENT_ERROR_MODES.join(', ')}`);
+  const logLevel = env.DZ23_LOG_LEVEL || 'info';
+  if (!Object.hasOwn(LOG_LEVELS, logLevel)) throw new ConfigError(`DZ23_LOG_LEVEL must be one of: ${Object.keys(LOG_LEVELS).join(', ')}`);
   const providerTimeoutMs = Math.max(1000, intEnv('DZ23_PROVIDER_TIMEOUT_MS', 90_000, env));
   const rateLimit = {
     enabled: flag(env, 'DZ23_RATE_LIMIT_ENABLED', true),
@@ -104,6 +106,10 @@ export function config(env = process.env) {
     maxPromptChars: int('DZ23_MAX_PROMPT_CHARS', 32_000, 1000, 200_000),
     maxGoalChars: int('DZ23_MAX_GOAL_CHARS', 8000, 500, 64_000),
     toolArgumentErrors,
+    logLevel,
+    maxRetries: int('DZ23_MAX_RETRIES', 1, 0, 5),
+    retryBaseDelayMs: int('DZ23_RETRY_BASE_DELAY_MS', 500, 50, 60_000),
+    retryAfterCapMs: int('DZ23_RETRY_AFTER_CAP_MS', 30_000, 0, 300_000),
     allowPaid: flag(env, 'DZ23_ALLOW_PAID'),
     rotation: list(env, 'DZ23_ROTATION'),
     rateLimit,
