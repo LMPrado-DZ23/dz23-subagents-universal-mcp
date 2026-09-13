@@ -1,5 +1,97 @@
 # Validação
 
+## v3.0.0 — auditoria independente em quatro rodadas e correções
+
+Data: 2026-09-13. Ambientes executados: Windows 11 com Node.js v24.16.0 e Ubuntu (WSL2, ext4) com
+Node.js v22.23.1. Branch `feat/v2.3.0-operability`, base `37ef590` (v2.2.5 publicada). A numeração 2.3.0
+foi usada apenas na candidata interna abaixo e virou 3.0.0 por causa das mudanças incompatíveis.
+
+### Processo
+
+1. Candidata `788e8ff` (seção v2.3.0 abaixo) revisada por três auditores independentes que não viram
+   os relatórios uns dos outros: arquitetura/engenharia, segurança/DevSecOps e produto/QA. Uma consulta
+   de consenso com três modelos revisou decisões de protocolo e versão.
+2. Rodada 1: 4 achados HIGH (checkpoints concorrentes perdiam dados, bloqueio de tokens válidos,
+   ferramentas sobrescreviam o handoff do harness, comando desconhecido abria o servidor stdio), além de
+   MEDIUM e LOW. Corrigidos em `8643c14` com `test/audit-fixes.test.js`.
+3. Rodadas 2 e 3 (reverificação de `8643c14`): todos os HIGH confirmados como corrigidos; novos MEDIUM
+   (fila cheia colocava alvo em cooldown, colisão de maiúsculas/minúsculas em registros existentes, lock
+   de PID 1 em container reiniciado, missão no limite de tamanho cobrava antes de falhar, sockets
+   silenciosos ocupavam conexões, erros de configuração que não saíam com 78). Corrigidos em `1457a5d`
+   com `test/audit-round2.test.js` e `test/audit-round3.test.js`.
+4. Rodada 4 (reverificação de `1457a5d`): um HIGH novo introduzido pela correção anterior (falha
+   transitória ao ler `owner.json` na liberação deixava o lock preso até reiniciar o processo) e MEDIUM
+   (checagem de maiúsculas quebrava IDs distintos em Linux, CLI apresentava ID com caixa trocada como
+   memória corrompida, um byte por conexão ainda segurava sockets). Corrigidos em `8ba063f` com
+   `test/audit-round4.test.js`, `test/audit-round4-cli.test.js` e `test/audit-round4-security.test.js`.
+5. Reverificação de `8ba063f`: arquitetura e produto confirmaram as correções da rodada 4, sem novos
+   CRITICAL, HIGH ou MEDIUM. Os LOW apontados pelo auditor de produto (`doctor` passava quando `--http`
+   recusaria o token, `memory repair --json` com `applied: true` sem reparos, texto da tabela de
+   variáveis) foram corrigidos em `7dda4ab` com `test/audit-round5.test.js`.
+6. Resultado da auditoria de segurança sobre `8ba063f`: ver "Resultado final da auditoria".
+
+### Gates em `7dda4ab`
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 68 arquivos JavaScript, lint com 0 problemas (Windows e Linux) |
+| `npm test` (Windows, Node 24) | 169 aprovados, 0 falhas |
+| `node --test` (Linux ext4 no WSL2, Node 22) | 168 aprovados, 0 falhas, 1 ignorado de propósito: o teste de ID com caixa trocada na CLI só se aplica a sistemas de arquivos que não diferenciam maiúsculas |
+| Arquivos das rodadas 3, 4 e 5 isolados | aprovados em execuções seguidas |
+| `npm run check:release` | PASS, versão 3.0.0, 112 arquivos, nenhum padrão de segredo (Windows e Linux) |
+| `npm run check:public` | PASS, 113 arquivos rastreados, 112 listados mais o próprio manifesto (Windows e Linux) |
+| `git diff --check` | sem problemas |
+| `npm run test:coverage` | linhas 94,39 %, branches 84,79 %, funções 90,20 % (relatório, sem limite mínimo) |
+
+A queda de cobertura em relação a `1457a5d` (96,03 % de linhas) é efeito de medição: os novos testes de
+CLI importam `src/cli.js` no próprio processo, então o arquivo passou a entrar no relatório. Antes a CLI era
+exercitada só em processos filhos, que não entram na cobertura. Os demais arquivos não perderam cobertura.
+
+**Cliente MCP oficial** (`@modelcontextprotocol/sdk` 1.30.0, diretório temporário, `--ignore-scripts`,
+fora do repositório): 17 de 17 verificações em stdio e Streamable HTTP em `7dda4ab` (e também em
+`8643c14`, `1457a5d` e `8ba063f`). `serverInfo` 3.0.0, 11 ferramentas, `memory_checkpoint` devolvendo resumo,
+`mission_status` com `state: null` para missão inexistente, `health_check` sem `confirm_billable`
+recusado, `GET /api/health` 405 e `POST /api/health` sem confirmação 400 com `error.details.field`.
+
+### Defeitos de teste encontrados e corrigidos
+
+- O teste de conexões silenciosas falhava só quando o arquivo rodava isolado. Um diagnóstico mostrou
+  que o servidor fechava o socket após 1 s como esperado; o cliente de teste estava em modo pausado e não
+  emitia `end`/`close`. A correção foi no teste (`socket.resume()`), sem afrouxar a asserção.
+- O teste de sonda de maiúsculas usava um diretório que já existia; passou a usar um subdiretório ainda
+  inexistente, para verificar que nada é criado antes do diretório de estado existir.
+
+### Resultado final da auditoria
+
+| Auditor | Última verificação | Resultado |
+| --- | --- | --- |
+| Arquitetura/engenharia | `8ba063f` | Correções da rodada 4 confirmadas (liberação de lock com leitura falhando, sonda de maiúsculas, cache de IDs); nenhum CRITICAL, HIGH ou MEDIUM novo |
+| Segurança/DevSecOps | `8ba063f` | Todas as correções confirmadas por medição no servidor (sockets silenciosos e gotejamento fechados, respostas não autenticadas encerram a conexão, endereço privado por IP, lock, custo da checagem de IDs); nenhum CRITICAL, HIGH ou MEDIUM novo |
+| Produto/QA | `8ba063f`, com os LOW corrigidos em `7dda4ab` | Fluxos da CLI, stdio e HTTP confirmados como usuário; nenhum CRITICAL, HIGH ou MEDIUM novo |
+
+Situação final: CRITICAL 0, HIGH 0, MEDIUM 0. Os itens LOW restantes estão em "Limitações conhecidas".
+
+### Limitações conhecidas desta versão
+
+- Sem limite de conexões por endereço (aplique no proxy reverso) e sem cota de disco ou de missões
+  por projeto (use cota no volume e escopos restritos).
+- Um provider local apontado para um endereço público continua elegível com o modelo configurado, sem
+  `DZ23_ALLOW_PAID`. Um gateway local em loopback ou rede privada que repassa para nuvens pagas também
+  continua isento da regra de modelo padrão; use `DZ23_ROTATION` nesses casos.
+- Alguns erros de configuração de enum interrompem na primeira ocorrência em vez de listar todos;
+  o servidor sai com 78 nos dois casos.
+- `consensus` registra o último revisor (`delegate`) em `last_tool_handoff`.
+- Nomes de host sem ponto (por exemplo `ollama`) contam como endereço privado; um domínio de busca DNS
+  poderia resolver um nome assim para um host público. Só o operador define esses endereços.
+- A liberação de lock trata como próprio um `owner.json` ilegível após cinco tentativas; apagar o lock de
+  outro processo exigiria, ao mesmo tempo, essa falha e uma tomada do lock.
+- Depois de renomear um diretório de missão só na caixa, fora do servidor, o mesmo processo pode aceitar
+  o nome antigo até reiniciar.
+- O guard de publicação é heurístico (por exemplo não recusa `.aws/credentials` ou `*.ppk`); a lista
+  auditada `PUBLIC_FILES.json` continua sendo a barreira principal.
+- Continuam valendo as limitações da validação v2.3.0 abaixo: nenhum provider real chamado, Docker
+  não executado, contadores por processo, locks em sistemas de arquivos de rede não testados.
+
 ## v2.3.0 — conformidade MCP, segurança HTTP, observabilidade, orçamento e memória v2
 
 Data: 2026-09-13. Ambiente executado: Windows 11, Node.js v24.16.0.
