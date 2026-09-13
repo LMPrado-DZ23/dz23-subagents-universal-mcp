@@ -26,7 +26,20 @@ export function ineligibleReason(target, cfg) {
  * arbitrary model on a mixed-tier provider could otherwise bypass the paid policy.
  */
 export function modelAllowed(target, cfg) {
-  return Boolean(cfg.rotation?.length) || target.location === 'local' || Boolean(cfg.allowPaid) || target.model === target.defaultModel;
+  return Boolean(cfg.rotation?.length) || (target.location === 'local' && isPrivateEndpoint(target.baseURL)) || Boolean(cfg.allowPaid) || target.model === target.defaultModel;
+}
+
+/**
+ * The local exemption follows the endpoint, not the provider name: CUSTOM_BASE_URL pointing at a public
+ * API is not local. A loopback or private-network gateway that forwards to paid clouds still counts as
+ * local, so such gateways should be used with DZ23_ROTATION.
+ */
+export function isPrivateEndpoint(baseURL) {
+  let host;
+  try { host = new URL(baseURL).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
+  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1' || host === 'host.docker.internal') return true;
+  if (/^(?:127|10)\./.test(host) || /^192\.168\./.test(host) || /^172\.(?:1[6-9]|2\d|3[01])\./.test(host)) return true;
+  return /^f[cd][0-9a-f]{2}:/.test(host);
 }
 
 /**

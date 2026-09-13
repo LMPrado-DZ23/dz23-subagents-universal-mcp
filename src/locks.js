@@ -69,6 +69,10 @@ export async function inspectLock(lockPath, {staleMs = 30_000, now = Date.now(),
     // Created before this host last booted: the owner is gone even if its PID was reused.
     removable = true;
     reason = 'owner_before_system_boot';
+  } else if (owner.pid === process.pid && owner.process_started_at && owner.process_started_at !== PROCESS_STARTED_AT) {
+    // Our PID but another start time: an earlier process, e.g. PID 1 of a restarted container.
+    removable = true;
+    reason = 'owner_pid_reused';
   } else {
     const alive = processAlive(owner.pid);
     removable = alive === false;
@@ -138,11 +142,13 @@ export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000
   const createdAt = new Date().toISOString();
   const owner = {lock_version: SCHEMA_VERSIONS.lock, pid: process.pid, hostname: os.hostname(), created_at: createdAt, updated_at: createdAt, process_started_at: PROCESS_STARTED_AT};
   // Atomic owner writes: readers never see a torn owner.json, and each rename refreshes the lock directory mtime.
+  let ownerWritten = false;
   const writeOwner = async () => {
     const tmp = path.join(lockPath, `${OWNER_FILE}.${crypto.randomUUID()}.tmp`);
     try {
       await fs.writeFile(tmp, JSON.stringify(owner), {mode: 0o600});
       await fs.rename(tmp, path.join(lockPath, OWNER_FILE));
+      ownerWritten = true;
     } catch {
       await fs.rm(tmp, {force: true}).catch(() => {});
     }
@@ -154,7 +160,12 @@ export async function withDirLock(dir, fn, {timeoutMs = 20_000, staleMs = 30_000
     return await fn();
   } finally {
     clearInterval(heartbeat);
-    for (let i = 0; i < 20; i++) {
+    // Release only our own lock: if it was parked meanwhile and another process now holds .lock, leave it.
+    let current = null;
+    try { current = JSON.parse(await fs.readFile(path.join(lockPath, OWNER_FILE), 'utf8')); } catch { current = null; }
+    // Without owner metadata the directory is ours only if our own owner write never succeeded.
+    const ours = current ? current.pid === owner.pid && current.created_at === owner.created_at : !ownerWritten;
+    for (let i = 0; ours && i < 20; i++) {
       try {
         await fs.rm(lockPath, {recursive: true, force: true});
         break;

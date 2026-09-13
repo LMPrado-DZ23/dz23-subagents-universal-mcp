@@ -3,7 +3,8 @@ import {ProjectMemory} from './memory.js';
 import {Router} from './core.js';
 import {createMcpHandler} from './mcp.js';
 import {createRpcProcessor} from './rpc.js';
-import {startHttp} from './http.js';
+import {startHttp, httpSecurityProblem} from './http.js';
+import {parseTarget} from './providers.js';
 import {startStdio} from './stdio.js';
 import {ConfigError} from './errors.js';
 import {createLogger} from './logger.js';
@@ -32,7 +33,15 @@ export async function serve(argv = []) {
   }
   const metrics = new Metrics();
   const memory = new ProjectMemory(cfg.stateDir, {...cfg, logger});
-  const router = new Router(cfg, memory, {logger, metrics});
+  let router;
+  try {
+    // Provider registry problems (bad base URL, unreadable secret file, unknown rotation provider) are configuration errors.
+    router = new Router(cfg, memory, {logger, metrics});
+    for (const entry of cfg.rotation) parseTarget(entry, router.registry);
+  } catch (error) {
+    logger.error('config_invalid', {message: `invalid provider configuration: ${String(error?.message).slice(0, 200)}; run: dz23-subagents config validate`});
+    process.exit(EX_CONFIG);
+  }
   const handler = createMcpHandler(router, memory, {logger, metrics});
   let server = null;
   let stdio = null;
@@ -42,7 +51,17 @@ export async function serve(argv = []) {
       logger.error('http_disabled', {message: 'set DZ23_ALLOW_HTTP=true only after configuring authentication'});
       process.exit(EX_CONFIG);
     }
-    server = await startHttp(cfg, router, memory, handler, {logger, metrics});
+    const problem = httpSecurityProblem(cfg);
+    if (problem) {
+      logger.error('config_invalid', {message: problem});
+      process.exit(EX_CONFIG);
+    }
+    try {
+      server = await startHttp(cfg, router, memory, handler, {logger, metrics});
+    } catch (error) {
+      logger.error('http_start_failed', {error_name: error?.name, code: error?.code});
+      process.exit(1);
+    }
     metrics.gauge('http_inflight', () => server.inflight());
     logger.info('server_started', {transport: 'http', host: cfg.host, port: server.address().port, version: SERVER_VERSION, protocol_versions: SUPPORTED_PROTOCOL_VERSIONS, auth_mode: cfg.authMode});
   } else {

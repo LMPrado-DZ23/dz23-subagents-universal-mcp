@@ -317,6 +317,7 @@ export class Router {
         try {
           output = await this.callTarget(target, messages, {timeoutMs: this.cfg.timeoutMs, maxTokens, maxResponseBytes: this.cfg.maxResponseBytes || 2 * 1024 * 1024});
         } catch (raw) {
+          if (raw instanceof ToolError) throw raw; // local admission (queue_full): no retry, cooldown or failover
           const error = toProviderError(raw, target);
           await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
           attempts.push(attemptRecord(error, attempt));
@@ -347,8 +348,8 @@ export class Router {
     assertRole(role);
     const preferred = this.resolvePreferred(target);
     const log = this.logger.child({request_id, project_id, mission_id, role});
-    // Only an explicit goal is recorded; prompts never overwrite harness-authored mission fields.
-    await this.ensureMission(project_id, mission_id, goal || '');
+    await this.ensureMission(project_id, mission_id, goal || ''); // explicit goal only; prompts never overwrite harness fields
+    await this.memory.assertHeadroom(project_id, mission_id); // a full mission fails before any billable call
     await this.memory.appendEvent(project_id, mission_id, 'delegation_started', {role, target, metadata, request_id});
     const candidates = [...preferred, ...this.availableTargets().filter(t => !preferred.some(p => targetKey(p) === targetKey(t)))];
     if (!candidates.length) {
@@ -379,8 +380,8 @@ export class Router {
         const agent = {id: crypto.randomUUID(), role, provider: candidate.name, model: candidate.model, started_at: new Date(outcome.startedAt).toISOString(), finished_at: isoNow(), status: 'completed'};
         await this.memory.recordAgentResult(project_id, mission_id, agent, outcome.output.content);
         await this.memory.appendEvent(project_id, mission_id, 'delegation_completed', {role, provider: candidate.name, model: candidate.model, latency_ms: outcome.latencyMs, failed_attempts: attempts.length, request_id});
-        await this.memory.checkpoint(project_id, mission_id, {last_tool_handoff: {tool: 'delegate', role, provider: candidate.name, model: candidate.model, at: isoNow(),
-          hint: 'Review the latest agent output and verify repository state before editing.'}});
+        await this.memory.recordHandoff(project_id, mission_id, {tool: 'delegate', role, provider: candidate.name, model: candidate.model, at: isoNow(),
+          hint: 'Review the latest agent output and verify repository state before editing.'});
         return {ok: true, project_id, mission_id, role, provider: candidate.name, model: candidate.model, content: outcome.output.content, usage: outcome.usage, attempts,
           ...(denials.length ? {budget_denials: denials} : {}), ...(request_id ? {request_id} : {})};
       }
@@ -487,8 +488,8 @@ export class Router {
         integration = {ok: false, ...failureSummary(error)};
       }
     }
-    await this.memory.checkpoint(project_id, mission_id, {last_tool_handoff: {tool: 'swarm_run', at: isoNow(), outcome: failed.length ? 'partial' : 'complete',
-      hint: 'Inspect the working tree and tests, then decide whether to apply the reviewer continuation plan.'}});
+    await this.memory.recordHandoff(project_id, mission_id, {tool: 'swarm_run', at: isoNow(), outcome: failed.length ? 'partial' : 'complete',
+      hint: 'Inspect the working tree and tests, then decide whether to apply the reviewer continuation plan.'});
     log.info('swarm_completed', {workers_ok: okRoles.length, workers_failed: failed.length, integration_ok: Boolean(integration?.ok), duration_ms: this.clock() - started});
     const routing = observeRouting(plan.routing, outputs);
     if (reviewer) routing.reviewer = {...reviewer, ...(integration?.ok ? {provider: integration.provider, model: integration.model} : {})};

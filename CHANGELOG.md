@@ -33,7 +33,8 @@ numa candidata interna, nunca publicada.
   itens e o estado a 4 MiB (`DZ23_MAX_CHECKPOINT_LIST_ITEMS`, `DZ23_MAX_STATE_BYTES`).
 - `delegate`, `consensus` e `swarm_run` não sobrescrevem mais `status`, `next_action` ou `goal`;
   gravam `last_tool_handoff`. O swarm não preenche mais listas de tarefas da missão.
-- Provedores locais só ficam ativos com configuração explícita (URL, modelo ou chave).
+- Provedores locais só ficam ativos com configuração explícita (URL, modelo, chave ou menção em
+  `DZ23_ROTATION`); a exceção à regra de modelo padrão vale só para endereços loopback ou privados.
 - Sem `DZ23_ROTATION`, alvos explícitos com modelo diferente do padrão do provider exigem
   `DZ23_ALLOW_PAID=true`; `verify_model` segue a mesma regra.
 - Com limites de custo e sem `DZ23_COST_POLICY`, o padrão é `deny_unknown_cost`.
@@ -41,7 +42,8 @@ numa candidata interna, nunca publicada.
   de iniciar, com código 78.
 - Argumentos que não sejam `--stdio`/`--http` são comandos da CLI; comando desconhecido sai com 2.
 - `swarm_run` sem `max_agents` usa no máximo `DZ23_MAX_CONCURRENCY` workers.
-- `token hash` recusa tokens com menos de 32 caracteres.
+- `token hash` recusa tokens com menos de 32 caracteres. Com HTTP habilitado, `DZ23_MCP_TOKEN` com
+  menos de 32 caracteres impede a inicialização (código 78).
 
 ### MCP e JSON-RPC
 - Validador de JSON Schema sem dependências; keywords não suportadas são recusadas no registro.
@@ -113,6 +115,18 @@ numa candidata interna, nunca publicada.
   de roteamento inválidos eram aceitos em silêncio.
 - IDs que diferem só por maiúsculas/minúsculas colidiam em Windows/macOS.
 - Guard de publicação passa a recusar `credentials*.json`, `secrets*.json` e `token*.txt`.
+- Segunda rodada: fila cheia não coloca mais um alvo saudável em cooldown; a checagem de
+  maiúsculas/minúsculas vale em todas as leituras e escritas da memória; lock com o PID deste
+  processo e outro horário de início (PID 1 de container reiniciado) é recuperado, e o compose fixa o
+  hostname; o handoff após uma chamada já paga não falha por limite de tamanho; `memory_checkpoint`
+  informa `truncated_lists`; `startMission` não sobrescreve missão criada em paralelo; um processo
+  só remove o próprio lock; erros HTTP inesperados trazem `request_id`.
+- Terceira rodada: missão que já atingiu `DZ23_MAX_STATE_BYTES` é recusada antes de qualquer chamada
+  paga; conexões HTTP silenciosas são fechadas após o timeout de headers; erro de provider, rotação com
+  provider desconhecido e HTTP inseguro fazem o servidor sair com 78 em vez de iniciar ou mostrar stack
+  trace; `config validate` acusa HTTP inseguro; `missions show --json` devolve erro em JSON; o erro de
+  colisão de maiúsculas não revela o identificador existente; o guard de publicação cobre mais nomes
+  de credencial (`tokens.json`, `*-key.json`, `service-account*.json`, `id_rsa`, `.npmrc` e outros).
 
 ## 2.2.5 — 2026-09-12 — hardening de orquestração e limites
 

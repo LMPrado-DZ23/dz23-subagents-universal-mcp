@@ -131,6 +131,8 @@ async function configCommand(positionals, opts, io) {
   if (cfg.rotation.some(entry => { try { parseTarget(entry, router.registry); return false; } catch { return true; } })) {
     issues.push({level: 'error', variable: 'DZ23_ROTATION', message: 'contains an unknown provider'});
   }
+  const httpProblem = cfg.allowHttp ? httpSecurityProblem(cfg) : null;
+  if (httpProblem) issues.push({level: 'error', variable: 'DZ23_HTTP_HOST', message: httpProblem});
   const result = {
     valid: !issues.some(issue => issue.level === 'error'), issues,
     summary: {state_dir: cfg.stateDir, http_enabled: cfg.allowHttp, http_host: cfg.host, auth_mode: cfg.authMode, token_source: cfg.tokenSource,
@@ -193,10 +195,9 @@ async function missions(positionals, opts, io) {
   let state;
   try { state = await memory.getMission(projectId, missionId); } catch (error) {
     if (!(error instanceof ToolError)) throw error;
-    io.stderr.write(`Mission memory is not readable (${error.details?.kind || error.code}); run: dz23-subagents memory repair\n`);
-    return EXIT.PROBLEMS;
+    return failure(io, opts.json, error.code, `Error (${error.code})`, `Mission memory is not readable (${error.details?.kind || error.code}); run: dz23-subagents memory repair`, EXIT.PROBLEMS);
   }
-  if (!state) { io.stderr.write('Mission not found\n'); return EXIT.PROBLEMS; }
+  if (!state) return failure(io, opts.json, 'mission_not_found', 'Error (mission_not_found)', 'Mission not found', EXIT.PROBLEMS);
   const journal = await memory.readJournal(projectId, missionId, 10);
   const result = {state, recent_events: journal.events, journal_integrity: {invalid_lines: journal.invalid_lines, last_seq: journal.last_seq}};
   print(io, result, opts.json, r => [`${r.state.project_id}/${r.state.mission_id}  status=${r.state.status}  sequence=${r.state.sequence}`, `goal: ${r.state.goal || '-'}`,

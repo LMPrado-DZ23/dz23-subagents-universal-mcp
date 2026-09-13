@@ -8,7 +8,7 @@
     },
     {
       "path": ".env.example",
-      "sha256": "bf0677979b701640d38f10e293077b833598a5096721fc6232d039904a72635e"
+      "sha256": "08a64867d84848ea2cd573853839db4cf1219411e0a424951ddc168edcda22e3"
     },
     {
       "path": ".gitattributes",
@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "67d05d2a48566b03b5f148303541af1525e8126399852f8e34f825dd97611ed4"
+      "sha256": "f9740debecedd1aa465621ddb740f283109b49e01bf4b05d4a7a3d9bed3c900e"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -96,7 +96,7 @@
     },
     {
       "path": "compose.yaml",
-      "sha256": "86fa7b7118e4a892dfe07ac3cc24801318ae7236e1f8df9379d0f373796e427f"
+      "sha256": "f7bbcff5986886fa4dd4324963df99cb551bc3191969bd1968be6ea8cae5617d"
     },
     {
       "path": "config/agents.example.json",
@@ -128,7 +128,7 @@
     },
     {
       "path": "docs/ARCHITECTURE.md",
-      "sha256": "4bbf7eb8e6787a2f07de16933c7e93048a31459b256a8324d6fe199af28c7785"
+      "sha256": "51cdb25f2111cc63e0b55655e2e8433e72f8507618540ef0a46d7d3f5d71385c"
     },
     {
       "path": "docs/HERMES_SELF_INSTALL.md",
@@ -140,7 +140,7 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "18d384e465ec7251984a03759d60dc22771848fbe45004e63808fc2016132c87"
+      "sha256": "280952f724990fbd173a946ebfffd21a98c934552b37726b55b58e1063f4a7f9"
     },
     {
       "path": "docs/PROVIDER_ARCHITECTURE.md",
@@ -160,7 +160,7 @@
     },
     {
       "path": "docs/TOOLS.md",
-      "sha256": "40ec0031f015544d70dc5af87a2349d214e19b9082708adc14038565cb1b743f"
+      "sha256": "588ae8be6216baadf52ecc6cc4790404d7ba49fa30fe21ca3cd13a9079600bda"
     },
     {
       "path": "docs/VALIDATION.md",
@@ -200,7 +200,7 @@
     },
     {
       "path": "scripts/release-check.mjs",
-      "sha256": "37dd86e403e946630f70e2ae109fca2a96d897c8c23ce703eb5fd9758d8f963b"
+      "sha256": "11746f1f6c89fc6e9d541a9bc83ebf191a0b1a21b5a03b9521c3efeeb3f59071"
     },
     {
       "path": "scripts/update-manifest.mjs",
@@ -216,7 +216,7 @@
     },
     {
       "path": "src/cli.js",
-      "sha256": "2e25b2e44b842693f8e9151cd5413a203b274f6a0a07b8f7c91492ff70c9d94b"
+      "sha256": "48ce9d61b665b638684287a16dc2b2b37a4ad060a1874246a3ca7c78d61d477c"
     },
     {
       "path": "src/concurrency.js",
@@ -224,7 +224,7 @@
     },
     {
       "path": "src/config.js",
-      "sha256": "a6965643fed932ed43803bb0bdf5fcd1dba8d376e6f9e3383fd05f5e69d557fe"
+      "sha256": "1ec3b2fe059ff78284575066e3f7f03b5745972a332730a9d26c7aa4d90e030b"
     },
     {
       "path": "src/consensus.js",
@@ -240,7 +240,7 @@
     },
     {
       "path": "src/core.js",
-      "sha256": "4d987047d48c0a6a5850b7010a8db6655c6f8abc78bb49efff036a70234c0ba6"
+      "sha256": "96b55c62a2c9b8541c1b852d998b87498e911a298908373174cb1bc4f5dc9555"
     },
     {
       "path": "src/env.js",
@@ -256,7 +256,7 @@
     },
     {
       "path": "src/http.js",
-      "sha256": "7c461b2c4492f604144f01a224b23180b027820fb3cec54774f5748ced84e149"
+      "sha256": "de95aa3fc71500e13a1ebafbf894dd94671e781850b40bf05080e26f675bf1af"
     },
     {
       "path": "src/index.js",
@@ -268,7 +268,7 @@
     },
     {
       "path": "src/locks.js",
-      "sha256": "2d0684ebc77e6ab5ec3e7284bf9935f0aa89efc3fdac943b89ef52c5097499cf"
+      "sha256": "6eeb9879ee25ef044328ffa51b299db5c1a0d1f1eb3bef72a3a2b3b7a86ba4ac"
     },
     {
       "path": "src/logger.js",
@@ -276,7 +276,7 @@
     },
     {
       "path": "src/mcp.js",
-      "sha256": "bb06c1e9fc7a8a6315da6f1aa95068b40f5c5c62969facef8de5dba4bb822081"
+      "sha256": "f1f36d72840021e46f0236d91a212a8645243f7843798792808a395d9f70a22b"
     },
     {
       "path": "src/memory-repair.js",
@@ -288,7 +288,7 @@
     },
     {
       "path": "src/memory.js",
-      "sha256": "31f71a26f910ef6a947a89c28dc6a0c5e184aee010bef0142d055b4157fe6779"
+      "sha256": "06bdd35c5085c362dbc4551dfc0876aaa5764a10839aa3781a427315fd6fc017"
     },
     {
       "path": "src/metrics.js",
@@ -328,7 +328,7 @@
     },
     {
       "path": "src/server.js",
-      "sha256": "88b0c0fd6b25be6eb2b8eb644b839fb6ab70c1fc8a2dbe829a4e544c651f1847"
+      "sha256": "0a4005886fdfe3fe7bc3c5ab835efdf87f93c6803c6d13b762342f741a4b122b"
     },
     {
       "path": "src/stdio.js",
@@ -336,7 +336,7 @@
     },
     {
       "path": "src/targets.js",
-      "sha256": "18f8fe3f6c2191ee176437d90d21beac35751c63a07ad8a17e1a5b022e0792fd"
+      "sha256": "d0dc7e7b2221a4d735ab3e1b55410703ec5bcdb6af2db76782f33dcf5595397d"
     },
     {
       "path": "src/tools.js",
@@ -352,7 +352,15 @@
     },
     {
       "path": "test/audit-fixes.test.js",
-      "sha256": "173648ea791730200bc7b315866e26fd1c9f24a10aafd26812c66a53699829c0"
+      "sha256": "0021e281ff1d653e87cae8ad9cc262bfbe57cca00a71b7b6c0d130b0760e7494"
+    },
+    {
+      "path": "test/audit-round2.test.js",
+      "sha256": "25321e07035c12d3efc2deede3ec1fdef4ad32e44c8362534e47ceb527771cec"
+    },
+    {
+      "path": "test/audit-round3.test.js",
+      "sha256": "0861b4784de961ac000b2907bef148169ea6a11ad94e04292bc56e8230b59002"
     },
     {
       "path": "test/budget.test.js",

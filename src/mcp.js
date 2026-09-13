@@ -65,7 +65,8 @@ function checkpointSummary(snapshot) {
   const counts = Object.fromEntries(SUMMARY_LISTS.map(key => [key, Array.isArray(snapshot[key]) ? snapshot[key].length : 0]));
   const tests = Object.fromEntries(['passed', 'failed', 'pending'].map(key => [key, snapshot.tests?.[key]?.length || 0]));
   return {project_id: snapshot.project_id, mission_id: snapshot.mission_id, sequence: snapshot.sequence, status: snapshot.status,
-    next_action: snapshot.next_action || '', checkpoint_at: snapshot.checkpoint_at, goal_set: Boolean(snapshot.goal), counts, tests};
+    next_action: snapshot.next_action || '', checkpoint_at: snapshot.checkpoint_at, goal_set: Boolean(snapshot.goal), counts, tests,
+    ...(snapshot.truncated_lists ? {truncated_lists: snapshot.truncated_lists} : {})};
 }
 
 function toolRunner(router, memory) {

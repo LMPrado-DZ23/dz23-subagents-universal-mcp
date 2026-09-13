@@ -177,8 +177,7 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
     }
   }
 
-  async function handle(req, res) {
-    const ctx = {transport: 'http', requestId: acceptRequestId(req.headers['x-request-id']), identity: 'unauthenticated'};
+  async function handle(req, res, ctx) {
     const started = Date.now();
     res.once('close', () => metrics?.observe('http_request_duration_ms', Date.now() - started, {status: String(res.statusCode)}));
     if (state.closing) return fail(res, 503, 'shutting_down', 'Server is shutting down', ctx, undefined, {'retry-after': '1'});
@@ -221,11 +220,12 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   }
 
   const server = http.createServer({connectionsCheckingInterval: Math.min(limits.headersTimeoutMs, 2000)}, (req, res) => {
-    handle(req, res).catch(error => {
+    const ctx = {transport: 'http', requestId: acceptRequestId(req.headers['x-request-id']), identity: 'unauthenticated'};
+    handle(req, res, ctx).catch(error => {
       if (res.headersSent) return res.destroy();
       if (!error.httpStatus) logger?.error('http_request_failed', {error_name: error.name});
       const code = error.httpStatus ? error.message : 'request_failed';
-      fail(res, error.httpStatus || 500, code, BODY_ERRORS[code] || 'Request failed', null, undefined, error.httpStatus ? {connection: 'close'} : {});
+      fail(res, error.httpStatus || 500, code, BODY_ERRORS[code] || 'Request failed', ctx, undefined, error.httpStatus ? {connection: 'close'} : {});
       if (error.httpStatus) res.once('finish', () => req.destroy());
     });
   });
@@ -233,6 +233,14 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   server.headersTimeout = limits.headersTimeoutMs;
   server.requestTimeout = limits.headersTimeoutMs + limits.bodyTimeoutMs + 1000;
   server.timeout = limits.socketTimeoutMs;
+  // A connection that never sends a byte is closed after headersTimeoutMs instead of holding a slot until the socket timeout.
+  server.on('connection', socket => {
+    const idle = setTimeout(() => { if (!socket.bytesRead) socket.destroy(); }, limits.headersTimeoutMs);
+    idle.unref();
+    const clear = () => clearTimeout(idle);
+    socket.once('data', clear);
+    socket.once('close', clear);
+  });
   server.keepAliveTimeout = 5000;
 
   /** Stop accepting work, let in-flight requests finish, force-close after the grace period. */

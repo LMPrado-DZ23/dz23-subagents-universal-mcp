@@ -84,6 +84,8 @@ dado não confiável e pode ser truncado; não há recuperação semântica ou v
 - stdio processa uma mensagem por vez, em ordem: chamadas longas atrasam as seguintes.
 - Mapas em memória por alvo e séries de métricas são limitados, para que nomes de modelo
   arbitrários não façam a memória crescer sem limite.
+- Não há cota de disco nem limite de missões por projeto: um token com `memory:write` pode criar muitas
+  missões. Use cota no volume de estado e escopos restritos.
 
 Não prometer: conformidade MCP completa, compatibilidade com todos os hosts, uso gratuito,
 conclusão autônoma de projetos, operação 24/7 sem supervisão ou qualidade medida por benchmarks.

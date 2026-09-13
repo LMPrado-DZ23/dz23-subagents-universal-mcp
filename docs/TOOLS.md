@@ -40,7 +40,8 @@ tratariam como a mesma pasta.
   mantém o atual. Cada lista guarda no máximo `DZ23_MAX_CHECKPOINT_LIST_ITEMS` itens (500, os mais
   recentes) e o estado inteiro no máximo `DZ23_MAX_STATE_BYTES` (4 MiB; acima disso
   `memory_limit_exceeded`). A resposta é um resumo (`sequence`, `status`, `next_action`, contagens
-  por lista); o estado completo vem de `mission_status`.
+  por lista, mais `truncated_lists` quando itens antigos foram descartados); o estado completo vem
+  de `mission_status`.
 - `mission_status.state` é `null` quando a missão não existe.
 - `delegate`, `consensus` e `swarm_run` nunca alteram `status`, `next_action` ou `goal` de uma
   missão existente: esses campos pertencem ao harness. Eles gravam `last_tool_handoff`
@@ -75,7 +76,8 @@ Resultados de sucesso têm `content[0].text` com o JSON e `structuredContent` se
 
 Na REST (`/api/*`) e nos erros de transporte HTTP o corpo de erro é sempre
 `{"error": {"code", "message", "request_id", "details"?}}`. `health_check` pela REST é
-`POST /api/health` com `{"confirm_billable": true}`; `GET /api/health` responde 405.
+`POST /api/health` com `{"confirm_billable": true}`; `GET /api/health` responde 405. Resultados em lista
+na REST (por exemplo `POST /api/health`) vêm como array JSON, sem o envelope `{items}` do MCP.
 
 ## Roteamento (`consensus` e `swarm_run`)
 
@@ -119,9 +121,12 @@ sozinho, não faz retry nem failover, respeita a política de custo e grava
 `last_verified_at`, `last_success_at`, latência e o último tipo de erro.
 
 A categoria de custo é declarada por provider, não por modelo. Por isso, sem `DZ23_ROTATION`, um
-`target` explícito só usa o modelo padrão do provider (servidores locais são exceção), a menos que
-`DZ23_ALLOW_PAID=true`; com rotação, só alvos da rotação são aceitos. `verify_model` segue a mesma
-regra e recusa com `details.reason: model_not_allowed`.
+`target` explícito só usa o modelo padrão do provider, a menos que `DZ23_ALLOW_PAID=true`. A exceção
+são providers locais cujo endereço é loopback ou de rede privada (um `CUSTOM_BASE_URL` público não
+conta); um gateway local que repassa para nuvens pagas deve ser usado com `DZ23_ROTATION`. Com
+rotação, `delegate`, `consensus` e `swarm_run` só aceitam alvos da rotação. `verify_model` serve para
+testar um modelo antes de incluí-lo: aceita alvos fora da rotação, mas nesse caso aplica a regra do
+modelo padrão e recusa com `details.reason: model_not_allowed`.
 
 `capabilities` descreve o adapter textual deste servidor (vision, tools, embeddings e
 streaming são `false` porque não são expostos). `model_capabilities` / `catalog_capabilities`

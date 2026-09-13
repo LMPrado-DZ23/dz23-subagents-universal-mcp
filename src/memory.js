@@ -24,27 +24,34 @@ function safe(value) {
 
 export const DEFAULT_MAX_LIST_ITEMS = 500;
 
-/** Merge a checkpoint list, keeping at most `maxItems` (the newest). */
-function mergeList(current, incoming, merge, maxItems) {
-  if (merge === 'replace') return [...incoming].slice(-maxItems);
+/** Merge a checkpoint list (dedupe on append). Capping happens in mergeCheckpointFields. */
+function mergeList(current, incoming, merge) {
+  if (merge === 'replace') return [...incoming];
   const out = [...(Array.isArray(current) ? current : [])];
   const seen = new Set(out.map(item => JSON.stringify(item)));
   for (const item of incoming) {
     const key = JSON.stringify(item);
     if (!seen.has(key)) { seen.add(key); out.push(item); }
   }
-  return out.slice(-maxItems);
+  return out;
 }
 
-/** Only provided fields change; an omitted status keeps the current status. */
-export function mergeCheckpointFields(state, fields, merge = 'append', maxItems = DEFAULT_MAX_LIST_ITEMS) {
+/**
+ * Only provided fields change; an omitted status keeps the current status. Lists keep the newest
+ * `maxItems`; how many items each list dropped is written to `truncated` (reported, not persisted).
+ */
+export function mergeCheckpointFields(state, fields, merge = 'append', maxItems = DEFAULT_MAX_LIST_ITEMS, truncated = {}) {
+  const capped = (name, list) => {
+    if (list.length > maxItems) truncated[name] = list.length - maxItems;
+    return list.slice(-maxItems);
+  };
   const patch = {};
   for (const key of CHECKPOINT_SCALARS) if (fields[key] !== undefined) patch[key] = fields[key];
-  for (const key of CHECKPOINT_LISTS) if (fields[key] !== undefined) patch[key] = mergeList(state?.[key], fields[key], merge, maxItems);
+  for (const key of CHECKPOINT_LISTS) if (fields[key] !== undefined) patch[key] = capped(key, mergeList(state?.[key], fields[key], merge));
   if (fields.tests) {
     const current = state?.tests || {};
     patch.tests = {...current};
-    for (const key of ['passed', 'failed', 'pending']) if (fields.tests[key]) patch.tests[key] = mergeList(current[key], fields.tests[key], merge, maxItems);
+    for (const key of ['passed', 'failed', 'pending']) if (fields.tests[key]) patch.tests[key] = capped(`tests.${key}`, mergeList(current[key], fields.tests[key], merge));
   }
   return patch;
 }
@@ -109,7 +116,13 @@ export class ProjectMemory {
   /** Case-insensitive filesystems would silently alias ids that differ only by case. */
   async assertNoCaseCollision(dir, id) {
     const clash = (await listIds(dir)).find(name => name !== id && name.toLowerCase() === id.toLowerCase());
-    if (clash) throw new ToolError('invalid_request', 'Identifier differs from an existing one only by letter case; reuse the existing identifier', {existing: clash});
+    if (clash) throw new ToolError('invalid_request', 'Identifier differs from an existing one only by letter case; reuse the existing identifier with its original letter case');
+  }
+
+  /** Checked on every read and write, not only on creation: lookups would otherwise alias silently. */
+  async checkIds(projectId, missionId) {
+    await this.assertNoCaseCollision(path.join(this.root, 'projects'), projectId);
+    if (missionId !== undefined) await this.assertNoCaseCollision(path.join(this.projectDir(projectId), 'missions'), missionId);
   }
 
   async initProject(projectId, data = {}) {
@@ -123,7 +136,8 @@ export class ProjectMemory {
     });
   }
 
-  getProject(projectId) {
+  async getProject(projectId) {
+    await this.checkIds(projectId);
     return this.readLocked(this.projectDir(projectId), () => this.readRecord(this.projectFile(projectId), migrateProject));
   }
 
@@ -132,18 +146,22 @@ export class ProjectMemory {
     return this.withLock(projectId, async () => {
       await this.assertNoCaseCollision(path.join(this.projectDir(projectId), 'missions'), missionId);
       const now = new Date().toISOString();
-      const mission = (await this.readRecord(this.missionFile(projectId, missionId), migrateMission)) || newMission(projectId, missionId, now);
-      const next = {...mission, ...data, updated_at: now};
+      const existing = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
+      // Creation data never overwrites a mission another caller created in the meantime.
+      if (existing) return existing;
+      const next = {...newMission(projectId, missionId, now), ...data, updated_at: now};
       await this.write(this.missionFile(projectId, missionId), next);
       return next;
     });
   }
 
-  getMission(projectId, missionId) {
+  async getMission(projectId, missionId) {
+    await this.checkIds(projectId, missionId);
     return this.readLocked(this.projectDir(projectId), () => this.readRecord(this.missionFile(projectId, missionId), migrateMission));
   }
 
   async mutateMission(projectId, missionId, mutate) {
+    await this.checkIds(projectId, missionId);
     return this.withLock(projectId, async () => {
       const current = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
       if (!current) throw new ToolError('mission_not_found', 'Mission not found');
@@ -171,6 +189,7 @@ export class ProjectMemory {
   }
 
   async appendEvent(projectId, missionId, type, payload = {}) {
+    await this.checkIds(projectId, missionId);
     return this.withLock(projectId, async () => {
       const {event, recovered} = await appendJournalEvent(this.journalFile(projectId, missionId), type, payload,
         {maxJournalBytes: this.maxJournalBytes, maxEventBytes: this.maxEventBytes, durable: this.durable});
@@ -180,6 +199,7 @@ export class ProjectMemory {
   }
 
   async checkpoint(projectId, missionId, extra = {}) {
+    await this.checkIds(projectId, missionId);
     return this.withLock(projectId, async () => {
       const state = await this.readRecord(this.missionFile(projectId, missionId), migrateMission);
       if (!state) throw new ToolError('mission_not_found', 'Mission not found');
@@ -201,10 +221,34 @@ export class ProjectMemory {
   /** Structured checkpoint from a harness. Creates the mission when absent. */
   async recordCheckpoint(projectId, missionId, fields = {}, {merge = 'append'} = {}) {
     if (!await this.getMission(projectId, missionId)) await this.startMission(projectId, missionId, {goal: fields.goal || ''});
-    return this.checkpoint(projectId, missionId, state => mergeCheckpointFields(state, fields, merge, this.maxListItems));
+    const truncated = {};
+    const snapshot = await this.checkpoint(projectId, missionId, state => mergeCheckpointFields(state, fields, merge, this.maxListItems, truncated));
+    return Object.keys(truncated).length ? {...snapshot, truncated_lists: truncated} : snapshot;
   }
 
-  readJournal(projectId, missionId, limit = 50) {
+  /** Tool handoff after a paid provider call: a state-size cap is logged, never raised. */
+  async recordHandoff(projectId, missionId, handoff) {
+    try {
+      await this.checkpoint(projectId, missionId, {last_tool_handoff: handoff});
+      return true;
+    } catch (error) {
+      if (error?.code !== 'memory_limit_exceeded') throw error;
+      this.logger.warn('handoff_checkpoint_skipped', {project_id: projectId, mission_id: missionId, reason: error.code});
+      return false;
+    }
+  }
+
+  /** Refuse new work on a mission whose state already reached DZ23_MAX_STATE_BYTES, before any paid call. */
+  async assertHeadroom(projectId, missionId) {
+    await this.checkIds(projectId, missionId);
+    const stat = await fs.stat(this.missionFile(projectId, missionId)).catch(() => null);
+    if (stat && stat.size >= this.maxStateBytes) {
+      throw new ToolError('memory_limit_exceeded', 'Mission state reached DZ23_MAX_STATE_BYTES; continue in a new mission', {bytes: stat.size, max_bytes: this.maxStateBytes});
+    }
+  }
+
+  async readJournal(projectId, missionId, limit = 50) {
+    await this.checkIds(projectId, missionId);
     return this.readLocked(this.projectDir(projectId), () => readJournal(this.journalFile(projectId, missionId), limit));
   }
 
@@ -227,6 +271,7 @@ export class ProjectMemory {
 
   /** Per-call usage: mission totals, bounded usage.jsonl, project totals and the shared daily file. */
   async recordUsage(projectId, missionId, record) {
+    await this.checkIds(projectId, missionId);
     await this.withLock(projectId, async () => {
       const file = this.missionFile(projectId, missionId);
       const mission = await this.readRecord(file, migrateMission);

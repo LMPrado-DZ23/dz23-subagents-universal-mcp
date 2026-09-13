@@ -68,7 +68,10 @@ Buckets em memória por processo, recarregados continuamente na janela
   `billable:10` (health_check, verify_model), `expensive:15` (consensus), `very_expensive:30` (swarm_run);
 - só tentativas com token inválido consomem pontos do endereço remoto (peso `moderate`); esgotado o
   bucket, novas tentativas inválidas recebem 429. Um token válido nunca é bloqueado pelas falhas de
-  outro cliente no mesmo endereço.
+  outro cliente no mesmo endereço. Com HTTP habilitado, `DZ23_MCP_TOKEN` precisa ter 32+ caracteres
+  (senão o servidor não inicia), o que torna inviável adivinhar o token.
+- conexões que não enviam nenhum byte são fechadas após `DZ23_HTTP_HEADERS_TIMEOUT_MS` (10 s). Não há
+  limite de conexões por endereço: fora de loopback, aplique esse limite no proxy reverso.
 
 Excesso retorna 429 com `Retry-After` antes de qualquer chamada a provider. A identidade é
 `token:<id>` com token ou `ip:<endereço>` sem token (loopback). Um peso maior que a capacidade
@@ -110,7 +113,8 @@ preços de nuvem devem vir das páginas oficiais dos fornecedores e ser revisado
 Um `lock_timeout` informa idade e motivo. `pid` e `hostname` do dono aparecem apenas em
 `memory repair`, para o operador, e nunca para clientes da ferramenta. O servidor remove sozinho
 apenas locks velhos cujo dono comprovadamente terminou neste host (processo inexistente ou lock
-criado antes do último boot) ou, sem metadados de dono, com mais que o dobro de
+criado antes do último boot, ou com o PID deste processo mas outro horário de início, como o PID 1
+de um container reiniciado) ou, sem metadados de dono, com mais que o dobro de
 `DZ23_LOCK_STALE_MS`. Para os demais:
 
 1. Confirme que nenhum processo do DZ23 Subagents está escrevendo nesse diretório de estado
@@ -145,15 +149,48 @@ Mensagens stdio são processadas uma por vez, na ordem de chegada: uma chamada l
 4. A memória 2.2.x é migrada na leitura e gravada como schema 2 na próxima escrita;
    versões anteriores do servidor não reconhecem o schema 2.
 5. Provedores locais (`custom`, `lmstudio`, `vllm`) só ficam ativos com `<PREFIXO>_BASE_URL`,
-   `<PREFIXO>_MODEL` ou chave definidos; antes os endereços padrão bastavam.
+   `<PREFIXO>_MODEL` ou chave definidos, ou quando `DZ23_ROTATION` os cita (nesse caso usam o endereço
+   padrão); antes os endereços padrão bastavam.
 6. Clientes REST: `health_check` passou a `POST /api/health` com `confirm_billable`, e detalhes de
    erro ficam em `error.details`.
+
+## Referência de variáveis
+
+Inteiros fora da faixa são ajustados ao limite com aviso; valores não numéricos e booleanos diferentes
+de `true`/`false` são erro. Variáveis de orçamento, rate limit, memória e autenticação estão nas seções
+acima; a lista completa com valores de exemplo fica em `.env.example`.
+
+| Variável | Padrão | Faixa | Efeito |
+| --- | --- | --- | --- |
+| `DZ23_HTTP_HOST` | `127.0.0.1` | — | Endereço do HTTP; fora de loopback exige token de 32+ caracteres ou tokens com escopo |
+| `DZ23_HTTP_PORT` | `8787` | 0–65535 | Porta do HTTP |
+| `DZ23_HTTP_MAX_BODY_BYTES` | `1048576` | 16 384–8 388 608 | Corpo máximo (413) |
+| `DZ23_HTTP_BODY_TIMEOUT_MS` | `10000` | 500–120 000 | Tempo para receber o corpo (408) |
+| `DZ23_HTTP_HEADERS_TIMEOUT_MS` | `10000` | 1000–60 000 | Tempo para os headers; também fecha conexões que não enviam nenhum byte |
+| `DZ23_HTTP_MAX_INFLIGHT` | `32` | 1–1024 | Requisições simultâneas (503) |
+| `DZ23_HTTP_MAX_CONNECTIONS` | `128` | 1–10 000 | Conexões TCP simultâneas |
+| `DZ23_HTTP_SOCKET_TIMEOUT_MS` | `900000` | 10 000–3 600 000 | Inatividade máxima de uma conexão já em uso |
+| `DZ23_RATE_LIMIT_ENABLED` | `true` | — | Liga o rate limit HTTP |
+| `DZ23_MAX_CONCURRENCY` | `7` | 1–8 | Chamadas a providers em paralelo no processo; padrão de workers do `swarm_run` |
+| `DZ23_MAX_WORKERS_PER_TARGET` | `4` | 1–7 | Chamadas simultâneas por `provider:model` |
+| `DZ23_PROVIDER_TIMEOUT_MS` | `90000` | 1000–600 000 | Timeout de cada chamada de delegação |
+| `DZ23_HEALTH_TIMEOUT_MS` | `15000` | 1000–120 000 | Timeout de `health_check` por alvo |
+| `DZ23_MAX_OUTPUT_TOKENS` | `4096` | 64–4096 | Máximo de tokens de saída pedidos ao provider |
+| `DZ23_MAX_RESPONSE_BYTES` | `2097152` | 65 536–4 194 304 | Resposta máxima aceita de um provider |
+| `DZ23_MAX_CONTEXT_CHARS` | `60000` | 10 000–120 000 | Contexto de missão enviado aos workers |
+| `DZ23_MAX_STORED_OUTPUT_CHARS` | `12000` | 1000–24 000 | Caracteres guardados por resposta de agente |
+| `DZ23_MAX_AGENT_OUTPUTS` | `16` | 1–32 | Respostas de agentes mantidas por missão |
+| `DZ23_MAX_JOURNAL_BYTES` | `1048576` | 65 536–4 194 304 | Tamanho do journal antes da rotação |
+| `DZ23_MAX_CHECKPOINTS` | `8` | 1–16 | Checkpoints mantidos por missão |
+| `DZ23_LOCK_TIMEOUT_MS` | `20000` | 1000–120 000 | Espera máxima por um lock de memória |
+| `DZ23_MAX_STDIO_FRAME_BYTES` | `524288` | 65 536–2 097 152 | Mensagem stdio máxima |
 
 ## Docker
 
 `docker compose up --build -d` com `.env` privado contendo o token (ou secret montado com
 `DZ23_MCP_TOKEN_FILE`, nunca os dois). O container roda como usuário não-root com código somente
 leitura, sistema de arquivos read-only, volume `/state`, limites de memória/CPU/processos e
-healthcheck autenticado (com apenas tokens com escopo, aponte `DZ23_HEALTHCHECK_TOKEN_FILE` para um
+healthcheck autenticado e hostname fixo, para que um container recriado reconheça os próprios locks
+(com apenas tokens com escopo, aponte `DZ23_HEALTHCHECK_TOKEN_FILE` para um
 deles; `/healthz` não exige escopo). A porta é publicada só em `127.0.0.1`. Não use `docker compose down -v`
 em atualizações: isso apaga a memória. Docker não foi executado no ambiente desta entrega.
