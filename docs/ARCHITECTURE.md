@@ -27,13 +27,16 @@ resultados, logs, memória ou erros.
    `provider:model`; o adapter chama o provider com timeout e limite de resposta.
 5. Falhas viram `ProviderError`. Só `rate_limited`, `provider_timeout` e `provider_unavailable`
    repetem no mesmo alvo, com backoff e `Retry-After` limitado. `invalid_request` encerra sem
-   failover; os demais tipos fazem failover e aplicam cooldown por tipo.
+   failover; `context_length_exceeded` faz failover sem cooldown; os demais tipos fazem failover e
+   aplicam cooldown por tipo. Cancelamento do cliente e `DZ23_DELEGATE_DEADLINE_MS` abortam a chamada.
 6. O uso é liquidado (tokens reportados ou estimados, custo por preço configurado ou reportado),
    a resposta é gravada na memória e um checkpoint registra `last_tool_handoff`, sem alterar
-   `status`, `next_action` ou `goal`, que pertencem ao harness.
+   `status`, `next_action` ou `goal`, que pertencem ao harness. Se a gravação falhar depois da
+   resposta, `delegate` devolve a resposta com `memory_warnings`.
 
 `swarm_run` distribui workers conforme a estratégia (padrão `first`, compatível com 2.2.5),
-aguarda todos e chama um revisor integrador. `consensus` usa alvos distintos. Nada disso
+aguarda todos e chama um revisor integrador, que recebe as respostas desta execução no prompt (com
+limite de tamanho). `consensus` usa alvos distintos. Nada disso
 executa shell, patches, worktrees ou testes: os workers produzem texto e o harness decide.
 
 ## Persistência
@@ -74,21 +77,23 @@ dado não confiável e pode ser truncado; não há recuperação semântica ou v
 
 - Uma instância é um domínio de confiança. Modo `scoped` restringe ferramentas por token, mas não
   isola projetos entre clientes: não há multitenancy.
-- Rate limit, reservas de orçamento, cooldowns e métricas são **por processo**. Vários processos
+- Rate limit, reservas de orçamento e métricas são **por processo**. Vários processos
   ou réplicas não compartilham contadores; o orçamento pode ser excedido pelas chamadas em voo de
-  outros processos que usam o mesmo diretório.
+  outros processos que usam o mesmo diretório. Cooldowns de provider são compartilhados pelo
+  diretório de estado quando `DZ23_SHARED_COOLDOWNS=true` (padrão).
 - A memória não é transacional entre arquivos: um crash entre `state.json`, journal e totais pode
   deixar atualização parcial (detectável por `memory repair`). Locks em sistemas de arquivos de rede
   não são garantidos. Não há criptografia em repouso, SQLite ou WAL.
 - HTTP é JSON sem SSE, sessões retomáveis, OAuth ou notificações do servidor.
-- stdio processa uma mensagem por vez, em ordem: chamadas longas atrasam as seguintes.
+- stdio processa até `DZ23_STDIO_MAX_INFLIGHT` (8) mensagens ao mesmo tempo; acima disso elas esperam.
 - Mapas em memória por alvo e séries de métricas são limitados, para que nomes de modelo
   arbitrários não façam a memória crescer sem limite.
 - Não há cota de disco nem limite de missões por projeto: um token com `memory:write` pode criar muitas
   missões. Use cota no volume de estado e escopos restritos.
-- Um provider local (`custom`, `lmstudio`, `vllm`) apontado para um endereço público continua elegível
-  com o modelo configurado sem `DZ23_ALLOW_PAID`, porque a categoria de custo vem do tipo do provider.
-  Não aponte providers locais para APIs pagas.
+- Um provider local (`custom`, `lmstudio`, `vllm`) apontado para um endereço que não é loopback nem
+  rede privada passa a `mixed` e fica bloqueado sem `DZ23_ALLOW_PAID` ou `DZ23_FREE_MODELS`. Um gateway
+  em rede privada que repassa para nuvens pagas continua `local`: não use essa configuração para
+  contornar a política de custo.
 
 Não prometer: conformidade MCP completa, compatibilidade com todos os hosts, uso gratuito,
 conclusão autônoma de projetos, operação 24/7 sem supervisão ou qualidade medida por benchmarks.
