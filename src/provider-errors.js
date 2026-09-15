@@ -6,10 +6,16 @@ const QUOTA = /insufficient_quota|exceeded your current quota|quota (?:exceeded|
 const AUTH = /invalid[ _-]?(?:api[ _-]?key|token|credentials?)|incorrect api key|unauthori[sz]ed|authentication/;
 const MODEL = /model[^.]{0,80}(?:not[ _-]?found|does not exist|unknown|not available|unsupported|decommissioned|deprecated)|no such model|model_not_found|invalid model|unknown model/;
 const LEGACY_KINDS = {quota_or_rate_limit: 429, auth_or_entitlement: 401, model_or_endpoint_missing: 404};
+const CONTEXT = /context[ _-]?(?:length|window)|maximum context|too many (?:input )?tokens|(?:prompt|input|message|request|payload)s? (?:is |are )?too (?:long|large)|reduce the length|exceeds? the (?:maximum|max(?:imum)? allowed)/;
+const RATE = /rate[ _-]?limit|tokens? per minute|requests? per minute|\b[tr]pm\b/;
+// A size complaint wins over a rate wording: Groq answers "Request too large ... tokens per minute (TPM)" when one
+// request exceeds the per-minute budget, and retrying the same target can never succeed.
+const TOO_LARGE = /too large|too long|requested \d+/;
 
 /** Map an HTTP failure to a stable kind. The body is inspected, never stored or returned. */
 export function classifyHttpFailure(status, body = '') {
   const text = String(body).slice(0, 8192).toLowerCase();
+  if (status === 413) return RATE.test(text) && !TOO_LARGE.test(text) ? 'rate_limited' : 'context_length_exceeded';
   if (status === 402) return 'billing_required';
   if ([400, 403, 429].includes(status) && QUOTA.test(text)) return 'quota_exhausted';
   if (BILLING.test(text)) return 'billing_required';
@@ -18,10 +24,11 @@ export function classifyHttpFailure(status, body = '') {
   if (status === 403) return AUTH.test(text) ? 'authentication_failed' : 'permission_denied';
   if (status === 404) return MODEL.test(text) ? 'model_not_found' : 'endpoint_not_found';
   if ((status === 400 || status === 422) && MODEL.test(text)) return 'model_not_found';
+  if ((status === 400 || status === 422) && CONTEXT.test(text)) return 'context_length_exceeded';
   if (status === 408 || status === 504) return 'provider_timeout';
   if ([500, 502, 503, 529].includes(status)) return 'provider_unavailable';
   if (status >= 500) return 'provider_error';
-  if ([400, 413, 422].includes(status)) return 'invalid_request';
+  if ([400, 422].includes(status)) return 'invalid_request';
   return 'provider_error';
 }
 

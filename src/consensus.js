@@ -44,14 +44,29 @@ export function jaccard(a, b) {
 
 const round2 = value => Math.round(value * 100) / 100;
 
-function agreement(analyzed) {
-  if (analyzed.length < 2) return {level: 'insufficient', score: null};
+function agreement(analyzed, divergent) {
+  if (analyzed.length < 2) return {level: 'insufficient', score: null, method: 'lexical_overlap'};
   const sets = analyzed.map(response => new Set(response.claims.flatMap(claim => [...claim.tokens])));
   let total = 0;
   let pairs = 0;
   for (let i = 0; i < sets.length; i++) for (let j = i + 1; j < sets.length; j++) { total += jaccard(sets[i], sets[j]); pairs++; }
   const score = round2(total / pairs);
-  return {level: score >= 0.5 ? 'high' : score >= 0.25 ? 'medium' : 'low', score};
+  const level = score >= 0.5 ? 'high' : score >= 0.25 ? 'medium' : 'low';
+  // Shared wording around different key terms ("use Postgres" vs "use Redis") is not agreement.
+  return {level: divergent && level === 'high' ? 'medium' : level, score, method: 'lexical_overlap'};
+}
+
+// Inflections of one word ("deploy" / "deploying") are paraphrase, not a different key term.
+const related = (x, y) => x.startsWith(y) || y.startsWith(x) || (x.length >= 5 && y.length >= 5 && x.slice(0, 5) === y.slice(0, 5));
+
+/** Key terms only one of two similar claims uses, or null when the difference looks like mere paraphrase. */
+export function divergentTerms(a, b) {
+  const onlyA = [...a].filter(token => !b.has(token));
+  const onlyB = [...b].filter(token => !a.has(token));
+  const distinctA = onlyA.filter(x => !onlyB.some(y => related(x, y)));
+  const distinctB = onlyB.filter(y => !onlyA.some(x => related(x, y)));
+  const keyTerms = list => list.length >= 1 && list.length <= 2 && list.every(token => token.length >= 4);
+  return keyTerms(distinctA) && keyTerms(distinctB) ? {a: distinctA, b: distinctB} : null;
 }
 
 /** @param responses successful reviewer answers: [{provider, model, content}] */
@@ -64,6 +79,7 @@ export function heuristicSynthesis(responses) {
   }));
   const common = [];
   const contradictions = [];
+  const divergences = [];
   const unverified = [];
   const covered = new Set();
   analyzed.forEach((response, i) => {
@@ -76,12 +92,17 @@ export function heuristicSynthesis(responses) {
         for (const candidate of other.claims) {
           const similarity = jaccard(claim.tokens, candidate.tokens);
           if (similarity < THRESHOLD) continue;
-          if (candidate.negated === claim.negated) {
-            supporters.add(j);
-            covered.add(candidate);
-          } else if (j > i) {
-            contradictions.push({similarity: round2(similarity), a: {source: response.source, text: claim.text}, b: {source: other.source, text: candidate.text}});
+          if (candidate.negated !== claim.negated) {
+            if (j > i) contradictions.push({similarity: round2(similarity), a: {source: response.source, text: claim.text}, b: {source: other.source, text: candidate.text}});
+            continue;
           }
+          const terms = divergentTerms(claim.tokens, candidate.tokens);
+          if (terms) {
+            if (j > i) divergences.push({similarity: round2(similarity), a: {source: response.source, text: claim.text, terms: terms.a}, b: {source: other.source, text: candidate.text, terms: terms.b}});
+            continue;
+          }
+          supporters.add(j);
+          covered.add(candidate);
         }
       });
       if (supporters.size >= 2) common.push({text: claim.text, supporters: supporters.size, sources: [...supporters].map(index => analyzed[index].source)});
@@ -91,9 +112,10 @@ export function heuristicSynthesis(responses) {
     method: 'heuristic_lexical_overlap',
     disclaimer: 'Lexical heuristic over model text. It does not verify facts, and agreement between models is not objective truth.',
     responses_analyzed: analyzed.length,
-    agreement: agreement(analyzed),
+    agreement: agreement(analyzed, divergences.length > 0),
     common_claims: common.sort((a, b) => b.supporters - a.supporters).slice(0, LIMIT),
     contradictions: contradictions.sort((a, b) => b.similarity - a.similarity).slice(0, LIMIT),
+    possible_divergences: divergences.sort((a, b) => b.similarity - a.similarity).slice(0, LIMIT),
     unverified_claims: unverified.slice(0, LIMIT),
     unverified_note: 'Advisory reviewers cannot run tests, deployments or measurements; execution claims need independent evidence.'
   };

@@ -1,6 +1,6 @@
 import {
   ID_PATTERN, PROVIDER_NAME_PATTERN, TARGET_PATTERN, ROLES, SWARM_ROLES, ROUTING_STRATEGIES,
-  SYNTHESIS_MODES, MISSION_STATUSES, CHECKPOINT_MERGE_MODES, EXPLICIT_TARGET_PATTERN
+  SYNTHESIS_MODES, MISSION_STATUSES, CHECKPOINT_MERGE_MODES, EXPLICIT_TARGET_PATTERN, RESPONSE_MODES
 } from './constants.js';
 import {assertSupportedSchema} from './schema.js';
 
@@ -32,9 +32,10 @@ export const TOOL_POLICIES = Object.freeze({
 
 const idField = description => ({
   type: 'string', minLength: 1, maxLength: 120, pattern: ID_PATTERN,
-  'x-pattern-reason': 'must use 1-120 letters, digits, dots, underscores or hyphens and start with a letter or digit',
+  'x-pattern-reason': 'must use 1-120 letters, digits, dots, underscores or hyphens, start with a letter or digit and not end with a dot',
   description
 });
+const REUSE_IDS = 'Reuse the project_id and mission_id of the current task (from project_init / memory_checkpoint); when omitted, results go to project "default" and a new random mission that mission_status and memory_checkpoint will not find.';
 const text = (maxLength, description) => ({
   type: 'string', minLength: 1, maxLength, pattern: '\\S', 'x-pattern-reason': 'must contain non-whitespace text', description
 });
@@ -62,6 +63,8 @@ const annotations = (title, {readOnly = false, idempotent = false, openWorld = f
 export function buildTools(limits = toolLimits()) {
   const projectId = idField('Project memory identifier. Not an authorization boundary.');
   const missionId = idField('Mission identifier inside the project.');
+  const workProjectId = {...idField('Project of the current task; defaults to "default".'), default: 'default'};
+  const workMissionId = idField('Mission of the current task; omitted creates a new random mission.');
   const tests = object({passed: stringList(limits), failed: stringList(limits), pending: stringList(limits)});
   const tools = [
     {name: 'list_models', title: 'List routing targets',
@@ -98,10 +101,11 @@ export function buildTools(limits = toolLimits()) {
         branch: plain(255, 'Branch name as recorded by the harness.')
       }, ['project_id']), annotations: annotations('Initialize project memory', {idempotent: true})},
     {name: 'mission_status', title: 'Mission status',
-      description: 'Read mission state and recent journal events.',
+      description: 'Read mission state and recent journal events. Agent outputs are returned as short previews unless include_outputs=true.',
       inputSchema: object({
         project_id: projectId, mission_id: missionId,
-        events_limit: {type: 'integer', minimum: 1, maximum: 200, default: 40, description: 'Recent journal events to return.'}
+        events_limit: {type: 'integer', minimum: 1, maximum: 200, default: 40, description: 'Recent journal events to return.'},
+        include_outputs: {type: 'boolean', default: false, description: 'Return full stored agent outputs instead of previews (can be very large).'}
       }, ['project_id', 'mission_id']), annotations: annotations('Mission status', {readOnly: true, idempotent: true})},
     {name: 'memory_checkpoint', title: 'Memory checkpoint',
       description: 'Persist a structured handoff checkpoint for another harness or agent. Creates the mission when absent.',
@@ -120,32 +124,35 @@ export function buildTools(limits = toolLimits()) {
         merge: {type: 'string', enum: CHECKPOINT_MERGE_MODES, default: 'append', description: 'append adds new list items; replace overwrites provided lists.'}
       }, ['project_id', 'mission_id']), annotations: annotations('Memory checkpoint')},
     {name: 'delegate', title: 'Delegate advisory task',
-      description: 'Delegate one advisory text task with bounded retries, failover and mission context. May consume provider credits.',
+      description: `Delegate one advisory text task with bounded retries, failover and mission context. May consume provider credits. ${REUSE_IDS}`,
       inputSchema: object({
-        project_id: {...projectId, default: 'default'}, mission_id: missionId,
+        project_id: workProjectId, mission_id: workMissionId,
         goal: plain(limits.maxGoalChars, 'Mission goal recorded when the mission is created.'),
         prompt: text(limits.maxPromptChars, 'The assignment for the subagent.'),
         role: {type: 'string', enum: ROLES, default: 'worker', description: 'Specialist role instruction.'},
         target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto', 'x-pattern-reason': 'must be auto or provider:model', description: 'auto or provider:model.'}
       }, ['prompt']), annotations: annotations('Delegate advisory task', {openWorld: true})},
     {name: 'consensus', title: 'Consensus review',
-      description: 'Ask 2-5 independent reviewers and return responses, observed diversity and an optional heuristic synthesis. May consume provider credits.',
+      description: `Ask 2-5 independent reviewers and return responses, observed diversity and an optional heuristic synthesis. May consume provider credits. ${REUSE_IDS}`,
       inputSchema: object({
-        project_id: {...projectId, default: 'default'}, mission_id: missionId,
+        project_id: workProjectId, mission_id: workMissionId,
         prompt: text(limits.maxPromptChars, 'Question or artifact to review.'),
-        models: {type: 'integer', minimum: 2, maximum: 5, default: 3, description: 'Reviewers to request.'},
+        models: {type: 'integer', minimum: 2, maximum: 5, default: 3, description: 'Number of independent reviewers to request (a count, not model names).'},
         ...routingFields('round_robin'),
         synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic', description: 'none, heuristic (no extra call) or model (one extra reviewer call).'}
       }, ['prompt']), annotations: annotations('Consensus review', {openWorld: true})},
     {name: 'swarm_run', title: 'Parallel specialist swarm',
-      description: 'Run up to seven advisory specialists in parallel, then one integrating reviewer. May consume provider credits.',
+      description: `Run up to seven advisory specialists in parallel, then one integrating reviewer. May consume provider credits and take minutes. ${REUSE_IDS}`,
       inputSchema: object({
-        project_id: {...projectId, default: 'default'}, mission_id: missionId,
+        project_id: workProjectId, mission_id: workMissionId,
         goal: text(limits.maxGoalChars, 'Project goal for every specialist.'),
-        roles: {type: 'array', minItems: 1, maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}, default: [...SWARM_ROLES]},
-        max_agents: {type: 'integer', minimum: 1, maximum: 7},
+        roles: {type: 'array', minItems: 1, maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}, default: [...SWARM_ROLES],
+          description: 'Specialist roles; workers cycle through this list.'},
+        max_agents: {type: 'integer', minimum: 1, maximum: 7, description: 'Number of workers; defaults to one per role, capped by DZ23_MAX_CONCURRENCY.'},
         ...routingFields('first'),
-        avoid_reviewer_target: {type: 'boolean', default: false, description: 'Prefer an integrating reviewer target not used by any worker.'}
+        avoid_reviewer_target: {type: 'boolean', default: false, description: 'Prefer an integrating reviewer target not used by any worker.'},
+        response_mode: {type: 'string', enum: RESPONSE_MODES, default: 'summary',
+          description: 'summary returns the full integration plus a short excerpt per worker; full returns every worker output.'}
       }, ['goal']), annotations: annotations('Parallel specialist swarm', {openWorld: true})}
   ];
   for (const tool of tools) assertSupportedSchema(tool.inputSchema, tool.name);

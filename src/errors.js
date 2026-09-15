@@ -56,7 +56,20 @@ export class ServerBusyError extends Error {
   }
 }
 
+/** ToolError for an aborted signal: the call deadline (TimeoutError reason) or a client cancellation. */
+export function abortError(signal) {
+  return signal?.reason?.name === 'TimeoutError'
+    ? new ToolError('deadline_exceeded', 'The tool call exceeded DZ23_DELEGATE_DEADLINE_MS; completed work may already be in mission memory')
+    : new ToolError('cancelled', 'The tool call was cancelled by the client');
+}
+
+export function throwIfAborted(signal) {
+  if (signal?.aborted) throw abortError(signal);
+}
+
 const TOOL_ERROR_HTTP_STATUS = {
+  cancelled: 499,
+  deadline_exceeded: 504,
   invalid_arguments: 400,
   invalid_request: 400,
   input_too_large: 413,
