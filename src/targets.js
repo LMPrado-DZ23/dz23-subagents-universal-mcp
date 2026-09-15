@@ -1,15 +1,35 @@
-import net from 'node:net';
 import {parseTarget} from './providers.js';
+import {isPrivateEndpoint} from './endpoints.js';
+
+export {isPrivateEndpoint} from './endpoints.js';
 
 export const targetKey = target => `${target.name}:${target.model}`;
+
+const PAID_TIERS = Object.freeze(['paid', 'low-cost']);
 
 export function tierRank(tier) {
   return ({local: 0, 'free-tier': 1, mixed: 2, 'low-cost': 3, paid: 4})[tier] ?? 9;
 }
 
-/** Enabled, complete, and allowed by the paid/low-cost policy. */
+/**
+ * Mixed-tier providers bill some models and not others, and their tier is per provider. Without
+ * DZ23_ALLOW_PAID only models the operator declared free may run: an OpenRouter-style `:free` model id
+ * or an exact `provider:model` entry in DZ23_FREE_MODELS.
+ */
+export function isDeclaredFree(target, cfg) {
+  return String(target.model || '').endsWith(':free') || (cfg.freeModels || []).includes(targetKey(target));
+}
+
+function costReason(target, cfg) {
+  if (cfg.allowPaid) return null;
+  if (PAID_TIERS.includes(target.tier)) return 'paid_not_allowed';
+  if (target.tier === 'mixed' && !isDeclaredFree(target, cfg)) return 'mixed_not_allowed';
+  return null;
+}
+
+/** Enabled, complete, and allowed by the paid, low-cost and mixed-tier policy. */
 export function isEligible(target, cfg) {
-  return Boolean(target.enabled && target.baseURL && target.model) && (cfg.allowPaid || !['paid', 'low-cost'].includes(target.tier));
+  return Boolean(target.enabled && target.baseURL && target.model) && !costReason(target, cfg);
 }
 
 /** Stable, non-sensitive reason why a target is not eligible, or null. */
@@ -17,8 +37,7 @@ export function ineligibleReason(target, cfg) {
   if (!target.enabled) return target.location === 'local' ? 'local_endpoint_not_configured' : 'missing_credential';
   if (!target.baseURL) return 'missing_base_url';
   if (!target.model) return 'missing_model';
-  if (!cfg.allowPaid && ['paid', 'low-cost'].includes(target.tier)) return 'paid_not_allowed';
-  return null;
+  return costReason(target, cfg);
 }
 
 /**
@@ -28,26 +47,6 @@ export function ineligibleReason(target, cfg) {
  */
 export function modelAllowed(target, cfg) {
   return Boolean(cfg.rotation?.length) || (target.location === 'local' && isPrivateEndpoint(target.baseURL)) || Boolean(cfg.allowPaid) || target.model === target.defaultModel;
-}
-
-/**
- * The local exemption follows the endpoint, not the provider name: CUSTOM_BASE_URL pointing at a public
- * API is not local. A loopback or private-network gateway that forwards to paid clouds still counts as
- * local, so such gateways should be used with DZ23_ROTATION.
- */
-export function isPrivateEndpoint(baseURL) {
-  let host;
-  try { host = new URL(baseURL).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { return false; }
-  if (!host) return false;
-  const version = net.isIP(host);
-  if (version === 4) {
-    const [a, b] = host.split('.').map(Number);
-    return a === 127 || a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
-  }
-  if (version === 6) return host === '::1' || /^f[cd][0-9a-f]{2}:/.test(host);
-  // Names: loopback, Docker's host alias, single-label LAN or compose service names (e.g. `ollama`) and mDNS `.local`.
-  // Dotted public-looking names such as `10.0.0.1.evil.com` or `127.0.0.1.nip.io` are not private.
-  return host === 'localhost' || host === 'host.docker.internal' || !host.includes('.') || host.endsWith('.local');
 }
 
 /**
@@ -67,4 +66,15 @@ export function eligibleTargets(cfg, registry) {
   const eligible = configured.map(entry => withRotationOptIn(parseTarget(entry, registry), cfg)).filter(t => isEligible(t, cfg));
   if ((cfg.policy || 'free-first') === 'free-first') eligible.sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
   return eligible;
+}
+
+/** Every configured rotation entry (or enabled default model) with its eligibility reason, for diagnostics. */
+export function targetReport(cfg, registry) {
+  const configured = cfg.rotation?.length
+    ? cfg.rotation
+    : Object.values(registry).filter(x => x.enabled && x.defaultModel).map(x => `${x.name}:${x.defaultModel}`);
+  return configured.map(entry => {
+    const target = withRotationOptIn(parseTarget(entry, registry), cfg);
+    return {target: targetKey(target), tier: target.tier, eligible: isEligible(target, cfg), reason: ineligibleReason(target, cfg)};
+  });
 }

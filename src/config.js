@@ -6,9 +6,11 @@ import {DEFAULT_COST_WEIGHTS, TOOL_ARGUMENT_ERROR_MODES, LOG_LEVELS, COST_POLICI
 import {ConfigError} from './errors.js';
 import {loadMcpToken, loadScopedTokens} from './auth.js';
 
-function expandHome(p) {
+export function expandHome(p) {
   if (!p) return p;
-  return p.startsWith('~/') ? path.join(os.homedir(), p.slice(2)) : p;
+  if (p === '~') return os.homedir();
+  // Both separators: `~\.dz23-subagents` on Windows must not become a path relative to each harness's working folder.
+  return /^~[\\/]/.test(p) ? path.join(os.homedir(), p.slice(2)) : p;
 }
 
 export function intEnv(name, fallback, env = process.env) {
@@ -181,7 +183,13 @@ export function config(env = process.env) {
     retryBaseDelayMs: int('DZ23_RETRY_BASE_DELAY_MS', 500, 50, 60_000),
     retryAfterCapMs: int('DZ23_RETRY_AFTER_CAP_MS', 30_000, 0, 300_000),
     allowPaid: bool('DZ23_ALLOW_PAID'),
+    freeModels: list(env, 'DZ23_FREE_MODELS'),
+    allowGenericCredentials: bool('DZ23_ALLOW_GENERIC_CREDENTIALS'),
     rotation: list(env, 'DZ23_ROTATION'),
+    delegateDeadlineMs: int('DZ23_DELEGATE_DEADLINE_MS', 600_000, 10_000, 3_600_000),
+    sharedCooldowns: bool('DZ23_SHARED_COOLDOWNS', true),
+    stdioMaxInflight: int('DZ23_STDIO_MAX_INFLIGHT', 8, 1, 64),
+    allowUnauthenticatedLocalHttp: bool('DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP'),
     rateLimit,
     http: {
       maxBodyBytes: int('DZ23_HTTP_MAX_BODY_BYTES', 1024 * 1024, 16_384, 8 * 1024 * 1024),
