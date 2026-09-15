@@ -1,6 +1,6 @@
 # Registro de providers e configuração
 
-Este inventário foi gerado do código v3.1.0, sem chamadas de rede e sem valores de
+Este inventário foi gerado do código v4.0.0, sem chamadas de rede e sem valores de
 credencial. Endpoints/modelos sugeridos são configuração, não prova de serviço
 atual, gratuidade, autenticação ou entitlement. Descubra/valide modelos na sua conta.
 Um campo de modelo vazio exige MODEL configurado ou alvo provider:model explícito.

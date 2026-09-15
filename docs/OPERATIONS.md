@@ -165,10 +165,11 @@ ordem de chegada. `ping` e notificações nunca esperam atrás de um `swarm_run`
 a desconexão do cliente aborta a chamada. `delegate`, `consensus` e `swarm_run` têm prazo total
 `DZ23_DELEGATE_DEADLINE_MS` (erros `cancelled` e `deadline_exceeded`, docs/TOOLS.md).
 
-## Atualizar para 3.1.0 no Windows
+## Atualizando de 2.2.x/3.0.0 para 4.0.0
 
-Vale para instalações 2.2.x e 3.0.x. Cenário comum: duas instalações, uma registrada no Claude Code e
-outra no Codex, ambas usando `~\.dz23-subagents`. Servidores de versões diferentes não devem rodar ao
+Vale para 2.2.x e 3.0.0: os passos e a revisão de variáveis são os mesmos. Os comandos são para
+Windows (PowerShell). Cenário comum: duas instalações, uma registrada no Claude Code e outra no Codex,
+ambas usando `~\.dz23-subagents`. Servidores de versões diferentes não devem rodar ao
 mesmo tempo sobre o mesmo diretório de estado durante a atualização: atualize as duas antes de reabrir
 qualquer harness.
 
@@ -189,13 +190,13 @@ qualquer harness.
    Copy-Item -Recurse "$env:USERPROFILE\.dz23-subagents" "$env:USERPROFILE\.dz23-subagents-backup-$stamp"
    ```
 
-3. **Extraia a 3.1.0 em uma pasta nova** (nunca sobre a antiga) e copie o `.env` antigo para ela:
+3. **Extraia a 4.0.0 em uma pasta nova** (nunca sobre a antiga) e copie o `.env` antigo para ela:
 
    ```powershell
-   Copy-Item "C:\caminho\antigo\.env" "C:\caminho\dz23-subagents-3.1.0\.env"
+   Copy-Item "C:\caminho\antigo\.env" "C:\caminho\dz23-subagents-4.0.0\.env"
    ```
 
-   Uma única pasta 3.1.0 pode atender os dois harnesses. Se mantiver duas, repita em cada uma e
+   Uma única pasta 4.0.0 pode atender os dois harnesses. Se mantiver duas, repita em cada uma e
    confirme que ambas usam o mesmo `DZ23_STATE_DIR`.
 
 4. **Revise o `.env`**:

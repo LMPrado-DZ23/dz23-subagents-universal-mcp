@@ -7,7 +7,7 @@ import path from 'node:path';
 import {spawn, spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 
-// 3.1.0 diagnostics: target eligibility, cost policy, ignored generic credentials and unauthenticated HTTP.
+// 4.0.0 diagnostics: target eligibility, cost policy, ignored generic credentials and unauthenticated HTTP.
 // Child processes get an explicit environment, so provider variables of the test host never leak in.
 
 const source = fileURLToPath(new URL('../', import.meta.url));
@@ -117,7 +117,7 @@ test('HTTP without any token fails doctor and config validate unless unauthentic
   assert.deepEqual(remote.json().issues.filter(issue => issue.level === 'error').map(issue => issue.variable), ['DZ23_HTTP_HOST'], 'no duplicate error off loopback');
 });
 
-test('config validate summary includes the 3.1.0 routing and runtime settings', async t => {
+test('config validate summary includes the 4.0.0 routing and runtime settings', async t => {
   const f = await fixture(t);
   const defaults = (await cli(f, ['config', 'validate', '--json'])).json().summary;
   assert.deepEqual([defaults.free_models, defaults.allow_generic_credentials, defaults.shared_cooldowns, defaults.delegate_deadline_ms, defaults.stdio_max_inflight],

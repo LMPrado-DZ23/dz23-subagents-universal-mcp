@@ -4,7 +4,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v3.1.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
+**v4.0.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
 
 [English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
@@ -84,7 +84,7 @@ configuração existente, executa a regressão e gera snippets.
 **Windows (PowerShell):** `powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1`
 realiza as mesmas etapas.
 
-**Já tem 2.2.x ou 3.0.x instalado?** Siga o [roteiro de atualização](docs/OPERATIONS.md#atualizar-para-310-no-windows):
+**Já tem 2.2.x ou 3.0.0 instalado?** Siga o [roteiro de atualização](docs/OPERATIONS.md#atualizando-de-22x300-para-400):
 backup do estado, pasta nova, revisão do `.env`, `config validate`/`doctor` e substituição das entradas
 nos harnesses.
 

@@ -1,4 +1,4 @@
-DZ23 SUBAGENTS UNIVERSAL MCP 3.1.0 — PACOTE OPEN-SOURCE
+DZ23 SUBAGENTS UNIVERSAL MCP 4.0.0 — PACOTE OPEN-SOURCE
 
 Uma única pasta. Sem ZIP antigo, sem bundle duplicado e sem chaves reais.
 
@@ -16,8 +16,8 @@ PARA INSTALAR
    [mcp_servers.dz23-subagents] (nunca crie uma segunda). Detalhes em docs/INSTALL_ANY_HARNESS.md.
    Alternativa: entregue HERMES_SELF_INSTALL_PROMPT.txt ao agente no computador alvo.
 
-ATUALIZAR UMA INSTALAÇÃO EXISTENTE (2.2.x ou 3.0.x)
-Siga o roteiro "Atualizar para 3.1.0 no Windows" em docs/OPERATIONS.md: feche os harnesses e
+ATUALIZAR UMA INSTALAÇÃO EXISTENTE (2.2.x ou 3.0.0)
+Siga o roteiro "Atualizando de 2.2.x/3.0.0 para 4.0.0" em docs/OPERATIONS.md: feche os harnesses e
 pare os processos do servidor, faça backup do DZ23_STATE_DIR, extraia em uma pasta nova,
 copie o .env, revise as variáveis, rode config validate e doctor e substitua as entradas MCP.
 Não rode versões antigas e novas ao mesmo tempo sobre o mesmo diretório de estado.

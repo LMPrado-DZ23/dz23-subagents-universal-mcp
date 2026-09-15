@@ -21,7 +21,7 @@ Node e de `src/index.js`:
 O gerador nunca modifica a configuração de um harness, não instala plugins e não reinicia hosts.
 Depois de editar o `.env`, rode `node src/index.js config validate` e `node src/index.js doctor`;
 nenhum dos dois chama providers. Para atualizar uma instalação existente, siga o roteiro em
-[docs/OPERATIONS.md](OPERATIONS.md#atualizar-para-310-no-windows).
+[docs/OPERATIONS.md](OPERATIONS.md#atualizando-de-22x300-para-400).
 
 ## Claude Code
 

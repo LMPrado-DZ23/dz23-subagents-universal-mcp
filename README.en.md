@@ -6,14 +6,14 @@
 
 Self-hosted MCP router for delegating text/code tasks to AI models, running parallel
 specialists and keeping explicit, versioned mission memory that another harness can resume.
-Version 3.1.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
+Version 4.0.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
 The linked guides are in Portuguese.
 
 Workers return text/code. They do not execute shell commands, edit repositories, use browsers
 or run tests; the host harness owns those operations. Handoff works through persisted state,
 not hidden model thoughts or unrecorded client conversations.
 
-## What 3.1.0 provides
+## What 4.0.0 provides
 
 - **MCP**: 11 tools, protocol revisions 2025-11-25 and 2025-06-18, enforced closed schemas with
   bounded inputs, standard JSON-RPC errors, tool execution errors with `request_id`. stdio runs up to
@@ -79,8 +79,8 @@ work over.
 
 ## Upgrading
 
-From 2.2.x or 3.0.x (Windows runbook in [docs/OPERATIONS.md](docs/OPERATIONS.md#atualizar-para-310-no-windows)):
-close all harnesses and stop the server processes; back up the state directory; extract 3.1.0 to a new
+From 2.2.x or 3.0.0 (Windows runbook in [docs/OPERATIONS.md](docs/OPERATIONS.md#atualizando-de-22x300-para-400)):
+close all harnesses and stop the server processes; back up the state directory; extract 4.0.0 to a new
 folder and copy the old `.env`; review the variable changes (`DZ23_FREE_MODELS` for mixed rotation
 entries, `GITHUB_TOKEN` → `GITHUB_MODELS_TOKEN`, `DZ23_OPENAI_*`/`DZ23_ANTHROPIC_*` instead of
 `OPENAI_BASE_URL`/`OPENAI_MODEL`/`ANTHROPIC_*`, HTTPS base URLs, an HTTP token); run `config validate`
