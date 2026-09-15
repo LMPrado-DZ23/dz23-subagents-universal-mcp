@@ -4,7 +4,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v3.0.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
+**v3.1.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm.**
 
 [English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
@@ -81,7 +81,12 @@ O campo `private: true` em `package.json` só impede publicação acidental no n
 **Linux/macOS:** `bash scripts/install-local.sh` cria `.env` se ausente, preserva uma
 configuração existente, executa a regressão e gera snippets.
 
-**Windows (PowerShell):** `./scripts/install-windows.ps1` realiza as mesmas etapas.
+**Windows (PowerShell):** `powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1`
+realiza as mesmas etapas.
+
+**Já tem 2.2.x ou 3.0.x instalado?** Siga o [roteiro de atualização](docs/OPERATIONS.md#atualizar-para-310-no-windows):
+backup do estado, pasta nova, revisão do `.env`, `config validate`/`doctor` e substituição das entradas
+nos harnesses.
 
 O repositório contém **somente `.env.example`**. O processo lê o `.env` da instalação,
 não o do projeto do harness. Exemplo inicial com um servidor local que você precisa iniciar:
@@ -100,6 +105,10 @@ Para nuvem: configure a chave em privado, rode `discover_models`, confirme com
 
 `free-first` apenas ordena categorias. `DZ23_ALLOW_PAID=false` bloqueia `paid` e `low-cost`,
 inclusive alvos explícitos e, sem `DZ23_ROTATION`, modelos que não sejam o padrão do provider.
+Também bloqueia `mixed` (OpenRouter, Gemini, Mistral, Together, Ollama cloud e outros que cobram
+alguns modelos), exceto ids terminados em `:free` ou `provider:modelo` listados em `DZ23_FREE_MODELS`:
+declare ali só modelos realmente gratuitos na sua conta. `doctor` mostra cada alvo como `eligible` ou
+`skipped(motivo)`.
 Para limitar gasto, defina uma tabela de preços (`DZ23_PRICES_FILE`) e limites como
 `DZ23_MAX_DAILY_COST_USD`, `DZ23_MAX_MISSION_COST_USD` ou `DZ23_MAX_MISSION_CALLS`; com limite de
 custo, chamadas de custo desconhecido são negadas por padrão (`DZ23_COST_POLICY`).
@@ -114,12 +123,18 @@ limites de gasto no fornecedor. Detalhes em [Operação](docs/OPERATIONS.md#orç
 as configurações existentes de Claude/Codex:
 
 ```text
-config/generated/claude_desktop_config.snippet.json
+config/generated/claude_code_add_command.txt
 config/generated/codex_config.snippet.toml
+config/generated/claude_desktop_config.snippet.json
 ```
 
-Copie somente a entrada `dz23-subagents` para o arquivo do cliente correspondente.
-Hermes e outros clientes precisam mapear `command`, `args` e transporte stdio ao próprio formato.
+- **Claude Code**: rode o comando de `claude_code_add_command.txt`
+  (`claude mcp add -s user dz23-subagents -- ...`) e confira com `claude mcp get dz23-subagents`.
+- **Codex**: substitua a tabela `[mcp_servers.dz23-subagents]` de `~/.codex/config.toml` pelo snippet,
+  que inclui `startup_timeout_sec = 30` e `tool_timeout_sec = 900`; nunca crie uma segunda tabela.
+- Hermes e outros clientes precisam mapear `command`, `args` e transporte stdio ao próprio formato.
+
+Ao atualizar, substitua a entrada existente em cada harness; não mantenha duas.
 [Guia completo](docs/INSTALL_ANY_HARNESS.md) · [Prompt para o harness](HERMES_SELF_INSTALL_PROMPT.txt)
 
 ## CLI operacional

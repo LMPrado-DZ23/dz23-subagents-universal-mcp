@@ -24,7 +24,29 @@ if(!fs.existsSync(entry)){
 }
 
 const claude={mcpServers:{'dz23-subagents':{command:node,args:[entry,'--stdio']}}};
-const codex=`\n[mcp_servers.dz23-subagents]\ncommand = ${JSON.stringify(node)}\nargs = [${JSON.stringify(entry)}, "--stdio"]\n`;
-if(target==='claude'||target==='all') write(path.join(root,'config','generated','claude_desktop_config.snippet.json'),JSON.stringify(claude,null,2));
-if(target==='codex'||target==='all') write(path.join(root,'config','generated','codex_config.snippet.toml'),codex.trimStart());
+// swarm_run and consensus can take minutes; Codex's default tool timeout would cut them off.
+const codex=[
+  '# Replace any existing [mcp_servers.dz23-subagents] table in ~/.codex/config.toml; never add a second one.',
+  '[mcp_servers.dz23-subagents]',
+  `command = ${JSON.stringify(node)}`,
+  `args = [${JSON.stringify(entry)}, "--stdio"]`,
+  'startup_timeout_sec = 30',
+  'tool_timeout_sec = 900',
+  ''
+].join('\n');
+// Shell quoting, not JSON: Windows paths keep single backslashes and cannot contain double quotes.
+const quote=value=>`"${value.replaceAll('"','\\"')}"`;
+const claudeCode=[
+  '# Claude Code, user scope. When upgrading, first run: claude mcp remove -s user dz23-subagents',
+  `claude mcp add -s user dz23-subagents -- ${quote(node)} ${quote(entry)} --stdio`,
+  '# Check with: claude mcp get dz23-subagents',
+  ''
+].join('\n');
+const out=path.join(root,'config','generated');
+if(target==='claude'||target==='all'){
+  write(path.join(out,'claude_desktop_config.snippet.json'),JSON.stringify(claude,null,2));
+  write(path.join(out,'claude_code_add_command.txt'),claudeCode);
+}
+if(target==='codex'||target==='all') write(path.join(out,'codex_config.snippet.toml'),codex);
 console.log('Generated reviewable snippets only. Existing harness configuration was not modified.');
+console.log('Upgrading: replace the existing dz23-subagents entry in each harness (see docs/OPERATIONS.md); never keep two entries.');

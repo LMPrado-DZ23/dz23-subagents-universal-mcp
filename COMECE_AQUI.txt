@@ -1,27 +1,31 @@
-DZ23 SUBAGENTS UNIVERSAL MCP 3.0.0 — PACOTE OPEN-SOURCE
+DZ23 SUBAGENTS UNIVERSAL MCP 3.1.0 — PACOTE OPEN-SOURCE
 
 Uma única pasta. Sem ZIP antigo, sem bundle duplicado e sem chaves reais.
 
 PARA INSTALAR
 1. Leia README.md e SECURITY.md. Requer Node.js 22+.
 2. Linux/macOS: bash scripts/install-local.sh
-   Windows PowerShell: ./scripts/install-windows.ps1
+   Windows: powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1
 3. O instalador cria .env a partir de .env.example apenas se ele ainda não existe.
 4. Configure o endpoint/modelo que realmente está disponível. Não publique o .env.
-5. Rode: node src/index.js doctor  (diagnóstico local, sem chamadas a providers).
-6. Revise config/generated e acrescente somente a entrada MCP ao seu harness.
+   Alvos mixed (openrouter, gemini, ollama cloud...) podem cobrar e ficam bloqueados sem
+   DZ23_ALLOW_PAID=true, salvo modelos declarados em DZ23_FREE_MODELS.
+5. Rode: node src/index.js config validate e node src/index.js doctor (sem chamadas a providers).
+6. Registre o servidor no harness com os arquivos de config/generated:
+   Claude Code: comando em claude_code_add_command.txt. Codex: substitua a tabela
+   [mcp_servers.dz23-subagents] (nunca crie uma segunda). Detalhes em docs/INSTALL_ANY_HARNESS.md.
    Alternativa: entregue HERMES_SELF_INSTALL_PROMPT.txt ao agente no computador alvo.
 
-PARA PUBLICAR
-Windows: extraia em uma pasta nova e abra PUBLICAR_WINDOWS.cmd com dois cliques.
-Ele encontra a pasta do projeto sozinho e executa o publicador com todos os gates.
-Nao precisa repetir o login gh se ja estiver autenticado.
+ATUALIZAR UMA INSTALAÇÃO EXISTENTE (2.2.x ou 3.0.x)
+Siga o roteiro "Atualizar para 3.1.0 no Windows" em docs/OPERATIONS.md: feche os harnesses e
+pare os processos do servidor, faça backup do DZ23_STATE_DIR, extraia em uma pasta nova,
+copie o .env, revise as variáveis, rode config validate e doctor e substitua as entradas MCP.
+Não rode versões antigas e novas ao mesmo tempo sobre o mesmo diretório de estado.
+Leia as mudanças incompatíveis em CHANGELOG.md.
+Os scripts PUBLICAR_* servem só para a primeira publicação no GitHub; não os use para atualizar.
 
-Leia docs/PUBLISH_GITHUB.md ou entregue PUBLICAR_COM_HARNESS.txt a um agente com
-terminal e GitHub autenticado. O pacote ainda NÃO comprova publicação no GitHub.
+PRIMEIRA PUBLICAÇÃO NO GITHUB (uma vez)
+Leia docs/PUBLISH_GITHUB.md. Windows: PUBLICAR_WINDOWS.cmd em uma pasta extraída nova, ou
+entregue PUBLICAR_COM_HARNESS.txt a um agente com terminal e GitHub autenticado.
 Primeiro teste: node scripts/publish-github.mjs --public --dry-run
-
-ATUALIZAÇÃO
-Preserve o .env e a pasta DZ23_STATE_DIR fora do repositório público e faça backup antes.
-A memória 2.2.x é migrada na leitura para o schema 2; nada é apagado automaticamente.
-Leia as mudanças incompatíveis em CHANGELOG.md e o roteiro em docs/OPERATIONS.md.
+O pacote não comprova publicação no GitHub.

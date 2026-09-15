@@ -14,9 +14,9 @@ inválido ou `DZ23_ROUTING_POLICY` desconhecida.
 
 | Comando | O que faz | Rede / custo |
 | --- | --- | --- |
-| `doctor` | Node, configuração, escrita no estado, rotação (falha sem alvos elegíveis), HTTP, orçamento, integridade da memória (falha com registros corrompidos) | nenhuma |
-| `config validate` | Resumo efetivo e problemas de configuração | nenhuma |
-| `providers` | Inventário com status de catálogo/verificação persistido | nenhuma |
+| `doctor` | Node, configuração, escrita no estado, rotação, alvos (falha sem alvo elegível), política de custo, credenciais genéricas ignoradas, HTTP (falha sem autenticação), orçamento, integridade da memória (falha com registros corrompidos) | nenhuma |
+| `config validate` | Resumo efetivo (inclui `free_models`, `allow_generic_credentials`, `shared_cooldowns`, `delegate_deadline_ms`, `stdio_max_inflight`) e problemas de configuração | nenhuma |
+| `providers` | Inventário com tier e status de catálogo/verificação persistido | nenhuma |
 | `health --yes` | Uma geração por alvo elegível; sem `--yes` recusa com código 2 | **pode cobrar** |
 | `missions list [--project <id>]` | Missões, status, sequência e objetivo resumido | nenhuma |
 | `missions show <project> <mission>` | Estado, uso e eventos recentes | nenhuma |
@@ -27,6 +27,26 @@ inválido ou `DZ23_ROUTING_POLICY` desconhecida.
 ```bash
 printf %s "$TOKEN" | node src/index.js token hash
 ```
+
+Checagens de `doctor` ligadas a roteamento (saída de texto; `--json` traz `{name, status, detail}`):
+
+```text
+PASS  targets: custom:qwen3-coder local eligible; ollama:gpt-oss:120b mixed skipped(mixed_not_allowed)
+WARN  cost_policy: skipped by cost policy: ollama:gpt-oss:120b (mixed_not_allowed); add a model to DZ23_FREE_MODELS only if it is really free for your account, or set DZ23_ALLOW_PAID=true to allow billed targets
+WARN  generic_credentials: ignored generic credential(s): github (env:GITHUB_TOKEN); set the specific variable (GITHUB_MODELS_TOKEN), name the provider in DZ23_ROTATION or set DZ23_ALLOW_GENERIC_CREDENTIALS=true
+```
+
+- `targets` lista cada entrada de `DZ23_ROTATION` (ou, sem rotação, o modelo padrão de cada provider
+  habilitado) como `provider:modelo tier eligible|skipped(motivo)`; falha quando nenhuma é elegível.
+  Motivos: `missing_credential`, `local_endpoint_not_configured`, `missing_base_url`, `missing_model`,
+  `paid_not_allowed`, `mixed_not_allowed`.
+- `cost_policy` avisa quando algum alvo foi pulado por `paid_not_allowed` ou `mixed_not_allowed`.
+- `generic_credentials` avisa quando `GITHUB_TOKEN`, `HF_TOKEN` ou `CLOUDFLARE_AUTH_TOKEN` existem mas
+  foram ignorados; mostra só nomes de variáveis.
+- `http` falha quando `DZ23_ALLOW_HTTP=true` sem token nem tokens com escopo e sem
+  `DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP=true`; com essa opção, avisa. `config validate` reporta o
+  mesmo caso como erro em `DZ23_MCP_TOKEN`.
+- Avisos não mudam o código de saída.
 
 ## Logs
 
@@ -137,23 +157,91 @@ Limites de tamanho: `DZ23_MAX_CHECKPOINT_LIST_ITEMS` (500 itens por lista) e
 ## Shutdown
 
 `SIGINT`/`SIGTERM` param de aceitar requisições, aguardam as em andamento por
-`DZ23_SHUTDOWN_GRACE_MS` (10 s) e então encerram. Em stdio, aguarda a mensagem em processamento.
+`DZ23_SHUTDOWN_GRACE_MS` (10 s) e então encerram. Em stdio, aguarda as mensagens em processamento.
 
-Mensagens stdio são processadas uma por vez, na ordem de chegada: uma chamada longa (por exemplo
-`swarm_run`) atrasa as seguintes. Use HTTP quando precisar de chamadas simultâneas.
+Em stdio até `DZ23_STDIO_MAX_INFLIGHT` (8) requisições rodam ao mesmo tempo; acima disso aguardam na
+ordem de chegada. `ping` e notificações nunca esperam atrás de um `swarm_run` longo.
+`notifications/cancelled` com `params.requestId` aborta a chamada correspondente, sem resposta. Em HTTP,
+a desconexão do cliente aborta a chamada. `delegate`, `consensus` e `swarm_run` têm prazo total
+`DZ23_DELEGATE_DEADLINE_MS` (erros `cancelled` e `deadline_exceeded`, docs/TOOLS.md).
 
-## Atualizando de 2.2.x para 3.0.0
+## Atualizar para 3.1.0 no Windows
 
-1. Faça backup de `.env` e do diretório de estado.
-2. Leia as mudanças incompatíveis em `CHANGELOG.md`.
-3. Rode `node src/index.js doctor` e `node src/index.js config validate`.
-4. A memória 2.2.x é migrada na leitura e gravada como schema 2 na próxima escrita;
-   versões anteriores do servidor não reconhecem o schema 2.
-5. Provedores locais (`custom`, `lmstudio`, `vllm`) só ficam ativos com `<PREFIXO>_BASE_URL`,
-   `<PREFIXO>_MODEL` ou chave definidos, ou quando `DZ23_ROTATION` os cita (nesse caso usam o endereço
-   padrão); antes os endereços padrão bastavam.
-6. Clientes REST: `health_check` passou a `POST /api/health` com `confirm_billable`, e detalhes de
-   erro ficam em `error.details`.
+Vale para instalações 2.2.x e 3.0.x. Cenário comum: duas instalações, uma registrada no Claude Code e
+outra no Codex, ambas usando `~\.dz23-subagents`. Servidores de versões diferentes não devem rodar ao
+mesmo tempo sobre o mesmo diretório de estado durante a atualização: atualize as duas antes de reabrir
+qualquer harness.
+
+1. **Pare tudo.** Feche Claude Code, Codex, Hermes e outros clientes. Liste os processos do servidor e
+   encerre apenas os que apontam para as pastas do DZ23 Subagents (confira a linha de comando):
+
+   ```powershell
+   Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+     Where-Object { $_.CommandLine -like '*src\index.js*' } |
+     Select-Object ProcessId, CommandLine
+   Stop-Process -Id <PID>
+   ```
+
+2. **Backup do estado** e dos `.env` antigos:
+
+   ```powershell
+   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+   Copy-Item -Recurse "$env:USERPROFILE\.dz23-subagents" "$env:USERPROFILE\.dz23-subagents-backup-$stamp"
+   ```
+
+3. **Extraia a 3.1.0 em uma pasta nova** (nunca sobre a antiga) e copie o `.env` antigo para ela:
+
+   ```powershell
+   Copy-Item "C:\caminho\antigo\.env" "C:\caminho\dz23-subagents-3.1.0\.env"
+   ```
+
+   Uma única pasta 3.1.0 pode atender os dois harnesses. Se mantiver duas, repita em cada uma e
+   confirme que ambas usam o mesmo `DZ23_STATE_DIR`.
+
+4. **Revise o `.env`**:
+   - Alvos `mixed` na rotação (por exemplo modelos cloud do `ollama`, `openrouter/auto`, `mistral`,
+     `together`, `gemini`) ficam bloqueados sem `DZ23_ALLOW_PAID=true`. Declare em
+     `DZ23_FREE_MODELS=ollama:gpt-oss:120b,...` apenas os modelos realmente gratuitos na sua conta; ids
+     terminados em `:free` já são aceitos.
+   - `GITHUB_TOKEN`, `HF_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` só habilitam o provider quando
+     `DZ23_ROTATION` o cita ou com `DZ23_ALLOW_GENERIC_CREDENTIALS=true`. Prefira `GITHUB_MODELS_TOKEN`,
+     `HUGGINGFACE_TOKEN` e `CLOUDFLARE_API_TOKEN`.
+   - `OPENAI_BASE_URL`, `OPENAI_MODEL`, `ANTHROPIC_BASE_URL` e `ANTHROPIC_MODEL` são ignorados: use
+     `DZ23_OPENAI_BASE_URL`, `DZ23_OPENAI_MODEL`, `DZ23_ANTHROPIC_BASE_URL` e `DZ23_ANTHROPIC_MODEL`.
+     Em todos os providers, `DZ23_<PROVIDER>_BASE_URL`/`_MODEL` têm precedência sobre os nomes antigos.
+   - Base URL `http://` só é aceita para loopback ou rede privada; o restante exige `https://`.
+   - Com `DZ23_ALLOW_HTTP=true`, configure `DZ23_MCP_TOKEN_FILE` (ou `DZ23_MCP_TOKEN`, 32+ caracteres),
+     mesmo em loopback.
+
+5. **Valide sem chamar providers**, na pasta nova:
+
+   ```powershell
+   node src\index.js config validate
+   node src\index.js doctor
+   ```
+
+   `doctor` deve mostrar `PASS  targets` com ao menos um alvo `eligible`. Leia os avisos `cost_policy` e
+   `generic_credentials` antes de continuar.
+
+6. **Substitua as entradas dos dois harnesses** (nunca acrescente uma segunda). Gere os arquivos com
+   `powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1` (roda check e testes) ou só
+   `node scripts\install-harness.mjs all`:
+   - Claude Code: `claude mcp remove -s user dz23-subagents`, depois o comando de
+     `config\generated\claude_code_add_command.txt`; confira com `claude mcp get dz23-subagents`.
+   - Codex: em `%USERPROFILE%\.codex\config.toml`, troque a tabela `[mcp_servers.dz23-subagents]` pelo
+     conteúdo de `config\generated\codex_config.snippet.toml` (inclui `startup_timeout_sec = 30` e
+     `tool_timeout_sec = 900`).
+
+7. **Reinicie e faça uma checagem barata.** Abra um harness e chame `list_models` e `mission_status`
+   com uma missão existente (nenhum dos dois gera texto). Repita no outro harness e só então delegue.
+
+Para voltar à versão anterior: feche os harnesses, restaure as entradas antigas e o backup do estado.
+
+Mudanças que já valiam na 3.0.0 (para quem vem da 2.2.x): a memória é migrada na leitura e gravada
+como schema 2 na próxima escrita; providers locais (`custom`, `lmstudio`, `vllm`) só ficam ativos com
+`BASE_URL`, `MODEL` ou chave definidos, ou quando `DZ23_ROTATION` os cita; `health_check` pela REST é
+`POST /api/health` com `confirm_billable`, e detalhes de erro ficam em `error.details`. Leia
+`CHANGELOG.md`.
 
 ## Referência de variáveis
 
@@ -192,6 +280,12 @@ foi de fato feito).
 | `DZ23_MAX_CHECKPOINTS` | `8` | 1–16 | Checkpoints mantidos por missão |
 | `DZ23_LOCK_TIMEOUT_MS` | `20000` | 1000–120 000 | Espera máxima por um lock de memória |
 | `DZ23_MAX_STDIO_FRAME_BYTES` | `524288` | 65 536–2 097 152 | Mensagem stdio máxima |
+| `DZ23_STDIO_MAX_INFLIGHT` | `8` | 1–64 | Requisições stdio processadas ao mesmo tempo |
+| `DZ23_DELEGATE_DEADLINE_MS` | `600000` | 10 000–3 600 000 | Prazo total de `delegate`, `consensus` e `swarm_run` (`deadline_exceeded`) |
+| `DZ23_SHARED_COOLDOWNS` | `true` | — | Persiste cooldowns de provider em `<estado>/providers/status.json`, compartilhados entre processos |
+| `DZ23_FREE_MODELS` | vazio | — | Lista `provider:modelo` de alvos `mixed` que o operador declara gratuitos |
+| `DZ23_ALLOW_GENERIC_CREDENTIALS` | `false` | — | Aceita `GITHUB_TOKEN`, `HF_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` sem citar o provider na rotação |
+| `DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP` | `false` | — | Permite `--http` em loopback sem token (apenas teste local) |
 
 ## Docker
 
