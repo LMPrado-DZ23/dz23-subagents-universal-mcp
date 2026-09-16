@@ -24,7 +24,8 @@ const registry = {p1: entry('p1'), p2: entry('p2')};
 
 async function tempDir(t) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'dz23-audit-'));
-  t.after(() => fs.rm(dir, {recursive: true, force: true}));
+  // A server-side write can still land while the directory is removed; retry instead of failing the hook.
+  t.after(() => fs.rm(dir, {recursive: true, force: true, maxRetries: 10, retryDelay: 50}));
   return dir;
 }
 
@@ -187,6 +188,10 @@ test('an HTTP client that disconnects cancels its delegate call', async t => {
   await request;
   await waitFor(() => aborted);
   await waitFor(() => server.inflight() === 0);
+  // The cancelled attempt is still recorded after the socket closes; let that write finish before cleanup.
+  for (let i = 0; i < 400 && (await memory.usageRecords('p', 'm')).length === 0; i++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal((await memory.usageRecords('p', 'm'))[0].status, 'failed');
+  await closeServer(server);
 });
 
 test('GET discovery is cache-only even with a cold cache', async t => {

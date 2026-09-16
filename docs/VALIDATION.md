@@ -43,7 +43,8 @@ foi chamado: os testes e o smoke usam fixtures e um provider falso local.
 | Comando | Resultado observado |
 | --- | --- |
 | `npm run check` | 74 arquivos JavaScript, lint com 0 problemas |
-| `npm test` (Windows, Node 24) | 212 aprovados, 0 falhas, em três execuções seguidas (cerca de 15 s cada) |
+| `npm test` (Windows, Node 24) | 212 aprovados, 0 falhas, em cinco execuções seguidas (cerca de 15 s cada) |
+| `node --test` (Linux no WSL2, Node 22) | 211 aprovados, 0 falhas, em duas execuções; 1 ignorado de propósito (só vale em sistema de arquivos sem diferença de maiúsculas) |
 | `npm run check:release` | PASS, versão 4.0.0, nenhum padrão de segredo |
 | `npm run check:public` | PASS |
 | `git diff --check` | sem problemas |
@@ -53,11 +54,13 @@ foi chamado: os testes e o smoke usam fixtures e um provider falso local.
 
 A bateria completa travava em `test/hardening-audit.test.js` depois de todos os testes passarem: o hook
 `t.after` esperava `server.close` enquanto uma conexão keep-alive ainda estava aberta, e hooks não têm
-timeout. O fechamento do servidor no teste passou a ter limite de 2 s. O código do servidor não mudou.
+timeout. A causa era a limpeza do diretório temporário, que falhava enquanto o servidor ainda gravava a tentativa cancelada e impedia o hook de fechar o servidor. O teste agora espera essa gravação, fecha o servidor e repete a limpeza.
+
+Na CI (Linux, Node 22), o teste de prazo falhava com `Promise resolution is still pending`: `AbortSignal.timeout` não mantém o event loop vivo. O prazo de `delegate`, `consensus` e `swarm_run` passou a usar um timer comum, cancelado quando a chamada termina.
 
 ### Não validado
 
-- Linux e Node 22 nesta rodada (a CI cobre os dois).
+- macOS.
 - Docker, HTTP atrás de proxy TLS e provedores reais.
 - `MCP_TOOL_TIMEOUT` do Claude Code e o comportamento do shim `.ps1` com `--`.
 

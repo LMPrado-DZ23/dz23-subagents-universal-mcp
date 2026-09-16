@@ -164,7 +164,7 @@
     },
     {
       "path": "docs/VALIDATION.md",
-      "sha256": "9223e6b2cafb272b19efbfffecb6f11ee3d0fb1c37169a8e424094d8298b3c7d"
+      "sha256": "0801d7c99a1b39903034b77ffaeeef753172e072fc4e37ff48b530f3fb0bd501"
     },
     {
       "path": "package.json",
@@ -280,7 +280,7 @@
     },
     {
       "path": "src/mcp.js",
-      "sha256": "d4a956f2bdc4365a9620e8739b1657325dffca0cae10776363c9e0a7112d905e"
+      "sha256": "c97aef1add20e86ea09e2a915e8ab3c65424570d99576b8d44e096ad95c00219"
     },
     {
       "path": "src/memory-repair.js",
@@ -400,7 +400,7 @@
     },
     {
       "path": "test/hardening-audit.test.js",
-      "sha256": "e4c55feb85a6d763bc743937700f21f68718359d4843319808c1beca429e5490"
+      "sha256": "abd793096132f5b775dd2839dfb6f88752166834f222a248581f369ecd9e71e7"
     },
     {
       "path": "test/hardening-policy.test.js",

@@ -56,10 +56,20 @@ export function summarizeSwarm(result) {
     : worker))};
 }
 
-/** Transport cancellation combined with the overall DZ23_DELEGATE_DEADLINE_MS deadline of a billable tool call. */
-function callSignal(signal, deadlineMs) {
-  const signals = [signal, deadlineMs ? AbortSignal.timeout(deadlineMs) : null].filter(Boolean);
-  return signals.length ? AbortSignal.any(signals) : undefined;
+/**
+ * Runs a billable call with transport cancellation combined with the DZ23_DELEGATE_DEADLINE_MS deadline.
+ * AbortSignal.timeout does not keep the event loop alive, so a call waiting only on the deadline could be
+ * dropped; a regular timer, cleared when the call settles, is used instead.
+ */
+async function withCallSignal(signal, deadlineMs, run) {
+  if (!deadlineMs) return run(signal);
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new DOMException('The operation timed out.', 'TimeoutError')), deadlineMs);
+  try {
+    return await run(signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function toolErrorPayload(error, ctx = {}) {
@@ -102,7 +112,8 @@ function checkpointSummary(snapshot) {
 
 function toolRunner(router, memory) {
   const withRequest = (args, ctx) => ({...args, request_id: ctx.requestId});
-  const billable = (args, ctx) => ({...args, request_id: ctx.requestId, signal: callSignal(ctx.signal, router?.cfg?.delegateDeadlineMs)});
+  const billable = (call, args, ctx) => withCallSignal(ctx.signal, router?.cfg?.delegateDeadlineMs,
+    signal => call({...args, request_id: ctx.requestId, signal}));
   return {
     list_models: async () => { await router.loadProviderStatus?.(); return router.listModels(); },
     provider_inventory: async () => { await router.loadProviderStatus?.(); return router.inventory(); },
@@ -117,10 +128,10 @@ function toolRunner(router, memory) {
         journal_integrity: {invalid_lines: journal.invalid_lines, last_seq: journal.last_seq}};
     },
     memory_checkpoint: async ({project_id, mission_id, merge, ...fields}) => checkpointSummary(await memory.recordCheckpoint(project_id, mission_id, fields, {merge})),
-    delegate: (args, ctx) => router.delegate(billable(args, ctx)),
-    consensus: (args, ctx) => router.consensus(billable(args, ctx)),
+    delegate: (args, ctx) => billable(input => router.delegate(input), args, ctx),
+    consensus: (args, ctx) => billable(input => router.consensus(input), args, ctx),
     swarm_run: async ({response_mode, ...args}, ctx) => {
-      const result = await router.swarmRun(billable(args, ctx));
+      const result = await billable(input => router.swarmRun(input), args, ctx);
       return response_mode === 'full' ? result : summarizeSwarm(result);
     }
   };
