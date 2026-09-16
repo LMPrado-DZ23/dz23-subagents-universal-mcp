@@ -52,11 +52,17 @@ foi chamado: os testes e o smoke usam fixtures e um provider falso local.
 
 ### Defeito de teste encontrado e corrigido
 
-A bateria completa travava em `test/hardening-audit.test.js` depois de todos os testes passarem: o hook
-`t.after` esperava `server.close` enquanto uma conexão keep-alive ainda estava aberta, e hooks não têm
-timeout. A causa era a limpeza do diretório temporário, que falhava enquanto o servidor ainda gravava a tentativa cancelada e impedia o hook de fechar o servidor. O teste agora espera essa gravação, fecha o servidor e repete a limpeza.
+A bateria completa travava às vezes em `test/hardening-audit.test.js`. No teste de desconexão HTTP, a
+limpeza do diretório temporário falhava (`ENOTEMPTY`) enquanto o servidor ainda gravava a tentativa
+cancelada; com o hook falho, o servidor HTTP do teste não era fechado e o processo não terminava. O teste
+agora espera essa gravação, fecha o servidor e a limpeza repete a remoção.
 
-Na CI (Linux, Node 22), o teste de prazo falhava com `Promise resolution is still pending`: `AbortSignal.timeout` não mantém o event loop vivo. O prazo de `delegate`, `consensus` e `swarm_run` passou a usar um timer comum, cancelado quando a chamada termina.
+### Defeito de produto encontrado pela CI e corrigido
+
+Na CI (Linux, Node 22), o teste de prazo falhava com `Promise resolution is still pending`:
+`AbortSignal.timeout` não mantém o event loop vivo, então uma chamada que só esperava o prazo podia ser
+descartada. O prazo de `delegate`, `consensus` e `swarm_run` passou a usar um timer comum, cancelado
+quando a chamada termina.
 
 ### Não validado
 
