@@ -33,7 +33,12 @@ test('HTTP failures map to a stable taxonomy', () => {
     [503, '', 'provider_unavailable'],
     [501, '', 'provider_error'],
     [400, 'messages: field required', 'invalid_request'],
-    [413, '', 'invalid_request'],
+    // 3.1.0: an oversized request is a per-target limit that fails over to a larger context window.
+    [413, '', 'context_length_exceeded'],
+    [413, 'Request too large for model `llama-3.3-70b-versatile` on tokens per minute (TPM): Limit 6000, Requested 15000', 'context_length_exceeded'],
+    [413, 'Rate limit reached, please retry later', 'rate_limited'],
+    [400, "This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens.", 'context_length_exceeded'],
+    [400, 'prompt is too long: 250000 tokens > 200000 maximum', 'context_length_exceeded'],
     [422, '', 'invalid_request'],
     [418, '', 'provider_error']
   ];

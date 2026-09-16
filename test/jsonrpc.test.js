@@ -144,15 +144,17 @@ test('stdio and HTTP return the same validation error for the same call', async 
     JSON.stringify(badCall)
   ]);
   assert.equal(stdio.length, 3, 'notification must not produce output');
-  assert.deepEqual([stdio[0].id, stdio[0].result.protocolVersion], [0, '2025-06-18']);
-  assert.deepEqual([stdio[1].id, stdio[1].error.code], [null, -32700]);
+  // stdio runs requests concurrently since 3.1.0, so responses are matched by id as JSON-RPC requires, not by position.
+  const byId = id => stdio.find(message => message.id === id);
+  assert.deepEqual([byId(0).id, byId(0).result.protocolVersion], [0, '2025-06-18']);
+  assert.equal(byId(null).error.code, -32700);
   const server = await startHttp(cfg, router, memory, handler);
   t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/mcp`, {method: 'POST', body: JSON.stringify(badCall),
     headers: {authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json', 'mcp-protocol-version': '2025-06-18'}});
   const http = await response.json();
   const strip = error => ({code: error.code, message: error.message, field: error.data.field, reason: error.data.reason});
-  assert.deepEqual(strip(http.error), strip(stdio[2].error));
+  assert.deepEqual(strip(http.error), strip(byId(9).error));
   assert.deepEqual(strip(http.error), {code: -32602, message: 'Invalid tool arguments', field: 'roles[1]', reason: 'must be one of: architect, backend, frontend, security, qa, devops, reviewer'});
 });
 

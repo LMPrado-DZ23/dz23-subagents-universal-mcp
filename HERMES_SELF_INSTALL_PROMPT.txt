@@ -10,11 +10,14 @@ Depois rode node src/index.js doctor e node src/index.js config validate (sem ch
 Crie .env a partir de .env.example somente se ausente. Preserve o estado existente.
 Use variáveis de ambiente/arquivos de segredo no runtime; não cole valores no chat.
 Não use provider cloud/pago sem autorização e sem limites de custo definidos na conta.
+Alvos mixed também podem cobrar: não acrescente modelos a DZ23_FREE_MODELS sem confirmar gratuidade.
 
-Execute node scripts/install-harness.mjs all. Revise caminhos reais e apenas acrescente
-a entrada dz23-subagents no formato suportado pelo host; nunca substitua o arquivo
-inteiro. Para Hermes/outros, descubra a configuração real antes de gravar. Reinício de
-sessões ativas requer cuidado; não mate processos de outros projetos.
+Execute node scripts/install-harness.mjs all. Revise caminhos reais. Se o host já tiver uma
+entrada dz23-subagents, substitua somente essa entrada (nunca crie uma segunda); senão
+acrescente-a no formato suportado pelo host. Nunca substitua o arquivo inteiro. Para
+Hermes/outros, descubra a configuração real antes de gravar. Reinício de sessões ativas
+requer cuidado; não mate processos de outros projetos. Em atualização, siga o roteiro de
+docs/OPERATIONS.md e não rode versões antigas e novas no mesmo diretório de estado.
 
 Teste initialize, tools/list, provider_inventory, project_init e mission_status com
 IDs sintéticos. Teste chamadas externas apenas com credenciais autorizadas e modelo
@@ -22,7 +25,7 @@ confirmado. Verifique erro de quota/failover com fixtures locais. Teste handoff 
 duas sessões conectadas à MESMA memória e confira checkpoints; não alegue integração
 com um host que não abriu. Os workers produzem texto; o harness aplica e testa código.
 
-HTTP fora de loopback exige token aleatório de 32+ caracteres e TLS/reverse proxy.
+HTTP exige token aleatório de 32+ caracteres mesmo em loopback e, fora de loopback, TLS/reverse proxy.
 Não exponha esta instância single-tenant como serviço público para usuários não confiáveis.
 Não apague a memória para resolver problemas. Se faltarem credenciais/permissões,
 registre BLOCKED_BY_EXTERNAL_DEPENDENCY e informe a ação específica sem inventar sucesso.

@@ -1,3 +1,7 @@
+# Replace any existing [mcp_servers.dz23-subagents] table; never add a second one.
 [mcp_servers.dz23-subagents]
 command = "node"
 args = ["/ABSOLUTE/PATH/dz23-subagents-universal-mcp/src/index.js", "--stdio"]
+startup_timeout_sec = 30
+# swarm_run and consensus can take minutes.
+tool_timeout_sec = 900

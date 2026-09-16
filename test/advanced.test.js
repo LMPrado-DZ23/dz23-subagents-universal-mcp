@@ -10,7 +10,8 @@ import {providerRegistry} from '../src/providers.js';
 test('swarm can run more workers than providers using bounded provider slots', { timeout: 20_000 }, async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'dz23-adv-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const memory = new ProjectMemory(root);
+  // This test measures limiter overlap, not durability: fsync on a loaded machine made setup exceed the watchdog.
+  const memory = new ProjectMemory(root, { durableWrites: false });
   const registry = { one: { name: 'one', baseURL: 'http://fake', apiKey: 'x', keyName: 'X', credentialSource: 'env:X', defaultModel: 'm1', tier: 'free-tier', protocol: 'openai', location: 'cloud', capabilities: { text: true }, enabled: true, configured: true } };
   const started = Promise.withResolvers(), submitted = Promise.withResolvers(), release = Promise.withResolvers();
   let active = 0, maxActive = 0, calls = 0, completed = 0;

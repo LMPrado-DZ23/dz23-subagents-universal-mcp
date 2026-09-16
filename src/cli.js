@@ -11,16 +11,18 @@ import {SERVER_VERSION, SUPPORTED_PROTOCOL_VERSIONS, ID_PATTERN} from './constan
 import {httpSecurityProblem} from './http.js';
 import {sha256Hex} from './auth.js';
 import {providerRegistry, parseTarget} from './providers.js';
+import {targetReport, withRotationOptIn, isEligible, ineligibleReason} from './targets.js';
 
 export const EXIT = Object.freeze({OK: 0, PROBLEMS: 1, USAGE: 2, CONFIG: 78});
 const ID = new RegExp(ID_PATTERN);
+const COST_REASONS = new Set(['paid_not_allowed', 'mixed_not_allowed']);
 
 export const USAGE = `dz23-subagents ${SERVER_VERSION}
 
 Usage:
   dz23-subagents [--stdio]                    Start the MCP server on stdio (default)
-  dz23-subagents --http                       Start the HTTP MCP server (requires DZ23_ALLOW_HTTP=true)
-  dz23-subagents doctor [--json]              Local diagnostics; never calls providers
+  dz23-subagents --http                       Start the HTTP MCP server (requires DZ23_ALLOW_HTTP=true and a token)
+  dz23-subagents doctor [--json]              Local diagnostics (targets, cost policy, HTTP auth); never calls providers
   dz23-subagents config validate [--json]     Validate configuration; never prints secret values
   dz23-subagents providers [--json]           Provider inventory with persisted catalog/verification status
   dz23-subagents health --yes [--json]        One real generation per eligible target (may be billed)
@@ -55,6 +57,12 @@ function table(rows, headers) {
 function validId(value, label = 'identifier') {
   if (typeof value !== 'string' || !ID.test(value)) throw new UsageError(`invalid ${label}: use 1-120 letters, digits, dots, underscores or hyphens`);
   return value;
+}
+
+/** --http refuses to start without any token unless the operator explicitly allows unauthenticated loopback HTTP. */
+function unauthenticatedHttpProblem(cfg) {
+  if (!cfg.allowHttp || cfg.token || cfg.scopedTokens.length || cfg.allowUnauthenticatedLocalHttp) return null;
+  return '--http refuses to start without authentication, even on loopback: set DZ23_MCP_TOKEN_FILE (or DZ23_MCP_TOKEN, 32+ characters) or scoped tokens; only for local testing set DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP=true';
 }
 
 /** Provider registry errors (invalid base URL, unreadable secret file) are configuration errors. */
@@ -101,9 +109,27 @@ async function doctor(opts, io) {
   if (unknown.length) add('rotation', 'fail', `${unknown.length} DZ23_ROTATION entr${unknown.length === 1 ? 'y has' : 'ies have'} an unknown provider`);
   const targets = unknown.length ? [] : router.targets();
   add('providers', targets.length ? 'pass' : 'fail',`${targets.length} eligible routing target(s), ${router.inventory().filter(p => p.enabled).length} enabled provider(s); no network calls made`);
+  if (!unknown.length) {
+    const report = targetReport(cfg, router.registry);
+    const source = cfg.rotation.length ? 'DZ23_ROTATION set (explicit rotation)' : 'DZ23_ROTATION unset (default model of each enabled provider)';
+    add('targets', report.some(entry => entry.eligible) ? 'pass' : 'fail', `${source}: ${report.length
+      ? report.map(entry => `${entry.target} ${entry.tier} ${entry.eligible ? 'eligible' : `skipped(${entry.reason})`}`).join('; ')
+      : 'no configured targets; set DZ23_ROTATION or a provider credential'}`);
+    const blocked = report.filter(entry => COST_REASONS.has(entry.reason));
+    add('cost_policy', blocked.length ? 'warn' : 'pass', `${source}; ${blocked.length
+      ? `skipped by cost policy: ${blocked.map(entry => `${entry.target} (${entry.reason})`).join(', ')}; add a model to DZ23_FREE_MODELS only if it is really free for your account, or set DZ23_ALLOW_PAID=true to allow billed targets`
+      : cfg.allowPaid ? 'DZ23_ALLOW_PAID=true; paid, low-cost and mixed targets may be billed' : 'DZ23_ALLOW_PAID=false; no configured target skipped by cost policy'}`);
+  }
+  const ignored = Object.values(router.registry).filter(entry => entry.ignoredCredentialSource);
+  add('generic_credentials', ignored.length ? 'warn' : 'pass', ignored.length
+    ? `ignored generic credential(s): ${ignored.map(entry => `${entry.name} (${entry.ignoredCredentialSource})`).join(', ')}; set the specific variable (${ignored.map(entry => entry.keyName).join(', ')}), name the provider in DZ23_ROTATION or set DZ23_ALLOW_GENERIC_CREDENTIALS=true`
+    : 'no generic credential ignored');
   if (cfg.allowHttp) {
-    const problem = httpSecurityProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'DZ23_MCP_TOKEN has fewer than 32 characters; --http refuses to start' : null);
-    add('http', problem ? 'fail' : 'pass', problem || `enabled on ${cfg.host}:${cfg.port}, auth ${cfg.authMode}, token source ${cfg.tokenSource}`);
+    const problem = httpSecurityProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'DZ23_MCP_TOKEN has fewer than 32 characters; --http refuses to start' : null) || unauthenticatedHttpProblem(cfg);
+    const open = !problem && !cfg.token && !cfg.scopedTokens.length;
+    add('http', problem ? 'fail' : open ? 'warn' : 'pass', problem || (open
+      ? `enabled on ${cfg.host}:${cfg.port} without authentication (DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP=true)`
+      : `enabled on ${cfg.host}:${cfg.port}, auth ${cfg.authMode}, token source ${cfg.tokenSource}`));
   } else {
     add('http', 'pass', 'disabled (stdio only)');
   }
@@ -133,24 +159,40 @@ async function configCommand(positionals, opts, io) {
   }
   const httpProblem = cfg.allowHttp ? httpSecurityProblem(cfg) : null;
   if (httpProblem) issues.push({level: 'error', variable: 'DZ23_HTTP_HOST', message: httpProblem});
+  const openHttp = httpProblem ? null : unauthenticatedHttpProblem(cfg);
+  if (openHttp) issues.push({level: 'error', variable: 'DZ23_MCP_TOKEN', message: openHttp});
   const result = {
     valid: !issues.some(issue => issue.level === 'error'), issues,
     summary: {state_dir: cfg.stateDir, http_enabled: cfg.allowHttp, http_host: cfg.host, auth_mode: cfg.authMode, token_source: cfg.tokenSource,
-      scoped_tokens: cfg.scopedTokens.length, rotation: cfg.rotation, allow_paid: cfg.allowPaid, cost_policy: cfg.budget.policy,
-      price_entries: Object.keys(cfg.budget.prices).length, rate_limit_enabled: cfg.rateLimit.enabled, log_level: cfg.logLevel}
+      scoped_tokens: cfg.scopedTokens.length, rotation: cfg.rotation, allow_paid: cfg.allowPaid, free_models: cfg.freeModels,
+      allow_generic_credentials: cfg.allowGenericCredentials, cost_policy: cfg.budget.policy, price_entries: Object.keys(cfg.budget.prices).length,
+      rate_limit_enabled: cfg.rateLimit.enabled, shared_cooldowns: cfg.sharedCooldowns, delegate_deadline_ms: cfg.delegateDeadlineMs,
+      stdio_max_inflight: cfg.stdioMaxInflight, log_level: cfg.logLevel}
   };
-  print(io, result, opts.json, r => [r.valid ? 'Configuration valid.' : 'Configuration has errors.', ...r.issues.map(i => `${i.level.toUpperCase()}  ${i.variable}: ${i.message}`)].join('\n'));
+  const shown = value => (Array.isArray(value) ? value.join(', ') || '-' : value === null || value === undefined || value === '' ? '-' : String(value));
+  print(io, result, opts.json, r => [r.valid ? 'Configuration valid.' : 'Configuration has errors.', ...r.issues.map(i => `${i.level.toUpperCase()}  ${i.variable}: ${i.message}`),
+    'Summary:', ...Object.entries(r.summary).map(([key, value]) => `  ${key}: ${shown(value)}`)].join('\n'));
   return result.valid ? EXIT.OK : EXIT.PROBLEMS;
 }
 
 async function providers(opts, io) {
-  const {router} = services(config(io.env));
+  const cfg = config(io.env);
+  const {router} = services(cfg);
   await router.loadProviderStatus();
   const inventory = router.inventory();
   const yes = (value, label) => (value ? label : '-');
-  print(io, inventory, opts.json, rows => table(rows.map(p => [p.provider, p.status, p.enabled ? 'yes' : 'no', yes(p.status_flags.credential_present, 'present'),
-    yes(p.status_flags.catalog_discovered, 'discovered'), yes(p.status_flags.inference_verified, 'verified'), p.default_model || '-']),
-  ['PROVIDER', 'STATUS', 'ENABLED', 'CREDENTIAL', 'CATALOG', 'INFERENCE', 'DEFAULT_MODEL']));
+  /** Cost-policy eligibility of the provider's default model and non-secret notes (text output only; JSON stays the inventory). */
+  const policy = p => {
+    const target = withRotationOptIn(parseTarget(p.provider, router.registry), cfg);
+    const reason = ineligibleReason(target, cfg);
+    const notes = [p.ignored_credential_source && `ignored ${p.ignored_credential_source}`, COST_REASONS.has(reason) && `blocked:${reason}`].filter(Boolean);
+    return [isEligible(target, cfg) ? 'yes' : 'no', notes.join(', ') || '-'];
+  };
+  print(io, inventory, opts.json, rows => table(rows.map(p => {
+    const [eligible, note] = policy(p);
+    return [p.provider, p.status, p.tier, eligible, p.enabled ? 'yes' : 'no', yes(p.status_flags.credential_present, 'present'),
+      yes(p.status_flags.catalog_discovered, 'discovered'), yes(p.status_flags.inference_verified, 'verified'), p.default_model || '-', note];
+  }), ['PROVIDER', 'STATUS', 'TIER', 'ELIGIBLE', 'ENABLED', 'CREDENTIAL', 'CATALOG', 'INFERENCE', 'DEFAULT_MODEL', 'NOTE']));
   return EXIT.OK;
 }
 

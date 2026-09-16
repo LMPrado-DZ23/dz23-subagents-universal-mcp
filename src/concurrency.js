@@ -1,4 +1,4 @@
-import {ToolError} from './errors.js';
+import {ToolError, abortError} from './errors.js';
 
 /** In-process call limits, shared by delegates, swarms, retries and health checks. */
 export class ConcurrencyLimiter {
@@ -10,9 +10,23 @@ export class ConcurrencyLimiter {
     this.byTarget = new Map();
     this.queue = [];
   }
-  async run(key, operation) {
+
+  /** A queued call whose signal aborts leaves the queue; an admitted call observes the signal itself. */
+  async run(key, operation, signal) {
+    if (signal?.aborted) throw abortError(signal);
     if (this.queue.length >= this.maxQueue) throw new ToolError('queue_full', 'Delegation queue is full; retry later');
-    await new Promise(resolve => { this.queue.push({key, resolve}); this.drain(); });
+    await new Promise((resolve, reject) => {
+      const onAbort = () => {
+        const index = this.queue.indexOf(item);
+        if (index < 0) return;
+        this.queue.splice(index, 1);
+        reject(abortError(signal));
+      };
+      const item = {key, resolve: () => { signal?.removeEventListener('abort', onAbort); resolve(); }};
+      signal?.addEventListener('abort', onAbort, {once: true});
+      this.queue.push(item);
+      this.drain();
+    });
     try { return await operation(); }
     finally {
       this.active--;
@@ -21,6 +35,7 @@ export class ConcurrencyLimiter {
       this.drain();
     }
   }
+
   drain() {
     for (let i = 0; i < this.queue.length && this.active < this.maxTotal;) {
       const item = this.queue[i];

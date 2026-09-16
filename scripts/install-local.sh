@@ -9,4 +9,4 @@ if [ ! -f "$ROOT/.env" ]; then cp "$ROOT/.env.example" "$ROOT/.env"; fi
 chmod 600 "$ROOT/.env"
 (cd "$ROOT" && npm run check && npm test)
 node "$ROOT/scripts/install-harness.mjs" all
-printf 'Prepared DZ23 Subagents at %s\nEdit .env privately and review config/generated before merging the snippets.\nExisting harness configurations were not modified.\n' "$ROOT"
+printf 'Prepared DZ23 Subagents at %s\nEdit .env privately and review config/generated before merging the snippets.\nClaude Code: run the command in config/generated/claude_code_add_command.txt (remove the old user-scope entry first when upgrading).\nCodex: replace the existing [mcp_servers.dz23-subagents] table; never add a second one.\nUpgrading: see docs/OPERATIONS.md.\nExisting harness configurations were not modified.\n' "$ROOT"

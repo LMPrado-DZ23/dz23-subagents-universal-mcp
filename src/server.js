@@ -3,7 +3,7 @@ import {ProjectMemory} from './memory.js';
 import {Router} from './core.js';
 import {createMcpHandler} from './mcp.js';
 import {createRpcProcessor} from './rpc.js';
-import {startHttp, httpSecurityProblem} from './http.js';
+import {startHttp, httpSecurityProblem, unauthenticatedHttpProblem} from './http.js';
 import {parseTarget} from './providers.js';
 import {startStdio} from './stdio.js';
 import {ConfigError} from './errors.js';
@@ -51,7 +51,7 @@ export async function serve(argv = []) {
       logger.error('http_disabled', {message: 'set DZ23_ALLOW_HTTP=true only after configuring authentication'});
       process.exit(EX_CONFIG);
     }
-    const problem = httpSecurityProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'HTTP bearer tokens must have at least 32 characters' : null);
+    const problem = httpSecurityProblem(cfg) || unauthenticatedHttpProblem(cfg) || (cfg.token && cfg.token.length < 32 ? 'HTTP bearer tokens must have at least 32 characters' : null);
     if (problem) {
       logger.error('config_invalid', {message: problem});
       process.exit(EX_CONFIG);
@@ -65,7 +65,7 @@ export async function serve(argv = []) {
     metrics.gauge('http_inflight', () => server.inflight());
     logger.info('server_started', {transport: 'http', host: cfg.host, port: server.address().port, version: SERVER_VERSION, protocol_versions: SUPPORTED_PROTOCOL_VERSIONS, auth_mode: cfg.authMode});
   } else {
-    stdio = startStdio({processMessage: createRpcProcessor(handler, {logger}), maxFrameBytes: cfg.maxStdioFrameBytes, logger});
+    stdio = startStdio({processMessage: createRpcProcessor(handler, {logger}), maxFrameBytes: cfg.maxStdioFrameBytes, maxInflight: cfg.stdioMaxInflight, logger});
     logger.info('server_started', {transport: 'stdio', version: SERVER_VERSION, protocol_versions: SUPPORTED_PROTOCOL_VERSIONS});
   }
 
@@ -78,7 +78,11 @@ export async function serve(argv = []) {
     hardStop.unref();
     try {
       if (server) await server.shutdown(cfg.shutdownGraceMs);
-      else if (stdio) await Promise.race([stdio.idle(), new Promise(resolve => setTimeout(resolve, cfg.shutdownGraceMs).unref())]);
+      else if (stdio) {
+        // Stop paid work first; cancelled calls settle their usage records while idle() waits within the grace period.
+        stdio.abortAll();
+        await Promise.race([stdio.idle(), new Promise(resolve => setTimeout(resolve, cfg.shutdownGraceMs).unref())]);
+      }
     } finally {
       logger.info('shutdown_completed', {signal});
       process.exit(0);

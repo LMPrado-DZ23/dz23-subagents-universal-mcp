@@ -21,4 +21,7 @@ try {
 }
 Write-Host "Prepared DZ23 Subagents at $Root"
 Write-Host 'Edit .env privately and review config\generated before merging the snippets.'
+Write-Host 'Claude Code: run the command in config\generated\claude_code_add_command.txt (remove the old user-scope entry first when upgrading).'
+Write-Host 'Codex: replace the existing [mcp_servers.dz23-subagents] table with config\generated\codex_config.snippet.toml; never add a second one.'
+Write-Host 'Upgrading from 2.2.x or 3.0.0: follow the Windows runbook in docs\OPERATIONS.md.'
 Write-Host 'Existing harness configurations were not modified.'

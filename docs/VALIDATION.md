@@ -1,5 +1,75 @@
 # Validação
 
+## v4.0.0 — política de custo, failover, cancelamento e stdio concorrente
+
+Data: 2026-09-16. Ambiente executado: Windows 11 com Node.js 24. Branch `fix/v3.1.0-hardening` (a
+candidata começou como 3.1.0 e virou 4.0.0 por causa das mudanças incompatíveis). Nenhum provider real
+foi chamado: os testes e o smoke usam fixtures e um provider falso local.
+
+### Processo
+
+1. Revisão da 3.0.0 publicada por três auditores independentes (engenharia, segurança e produto/DX).
+   Os achados HIGH da primeira rodada (política de custo que deixava passar provedores `mixed`,
+   credenciais genéricas herdadas de outras ferramentas, respostas pagas perdidas por falha de memória,
+   ausência de cancelamento, stdio serial) foram corrigidos com `test/hardening-policy.test.js`,
+   `test/hardening-runtime.test.js` e `test/cli-diagnostics.test.js`.
+2. Segunda rodada sobre a candidata corrigida. Achados e correção, cada um com teste em
+   `test/hardening-audit.test.js`:
+   - HIGH: falha de autenticação de um harness era compartilhada e tirava o provider dos outros; agora só
+     tipos transitórios são compartilhados.
+   - Cancelamento burlava o orçamento; agora a chamada cancelada é cobrada pela reserva.
+   - `Retry-After` sem limite permitia cooldown de anos; limitado a 1 hora.
+   - `GET /api/discover` contatava provedores com cache vazio; agora só lê o cache.
+   - Nomes sem ponto e `.local` eram tratados como rede privada; agora exigem `DZ23_PRIVATE_HOSTS`.
+   - `:free` liberava modelos em qualquer provider; agora só no OpenRouter. Modelos `:cloud` via adapter
+     local passaram a `mixed`.
+   - Nomes sem prefixo (`OLLAMA_BASE_URL`, `GROQ_MODEL`...) e `CLOUDFLARE_API_TOKEN` podiam redirecionar
+     chaves; agora são ignorados ou tratados como credencial genérica.
+   - Respostas de workers podiam forjar o fim do bloco no prompt do integrador; marcadores com nonce.
+   - stdio: requisição cancelada na fila ainda rodava, fila sem limite, `id` duplicado aceito.
+   - Classificador de contexto grande amplo demais; backoff ignorava cancelamento; consenso marcava
+     "30 s" e "90 s" como concordância.
+   - CRITICAL de produto: `DZ23_ROUTING_POLICY=ordered` (valor da 2.2.x em uso) impedia o servidor de
+     iniciar; virou alias com aviso.
+3. Os scripts de reprodução dos auditores foram executados de novo sobre a correção. Resultados:
+   cancelamento durante backoff retorna em cerca de 115 ms sem listeners pendentes; falha de
+   autenticação não aparece em `providers/status.json`; desconexão HTTP aborta a chamada e registra
+   uso `failed/cancelled`; requisição stdio cancelada na fila não roda (crescimento de heap do cenário de
+   carga caiu de 209 MB para 41 MB); chamada cancelada cobrada com 5272 tokens estimados; `http://gateway`
+   recusado; divergências de número e de comparação detectadas.
+
+### Gates
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 74 arquivos JavaScript, lint com 0 problemas |
+| `npm test` (Windows, Node 24) | 212 aprovados, 0 falhas, em cinco execuções seguidas (cerca de 15 s cada) |
+| `node --test` (Linux no WSL2, Node 22) | 211 aprovados, 0 falhas, em duas execuções; 1 ignorado de propósito (só vale em sistema de arquivos sem diferença de maiúsculas) |
+| `npm run check:release` | PASS, versão 4.0.0, nenhum padrão de segredo |
+| `npm run check:public` | PASS |
+| `git diff --check` | sem problemas |
+| Smoke com processo real (servidor stdio + provider falso) | 15/15 |
+
+### Defeito de teste encontrado e corrigido
+
+A bateria completa travava às vezes em `test/hardening-audit.test.js`. No teste de desconexão HTTP, a
+limpeza do diretório temporário falhava (`ENOTEMPTY`) enquanto o servidor ainda gravava a tentativa
+cancelada; com o hook falho, o servidor HTTP do teste não era fechado e o processo não terminava. O teste
+agora espera essa gravação, fecha o servidor e a limpeza repete a remoção.
+
+### Defeito de produto encontrado pela CI e corrigido
+
+Na CI (Linux, Node 22), o teste de prazo falhava com `Promise resolution is still pending`:
+`AbortSignal.timeout` não mantém o event loop vivo, então uma chamada que só esperava o prazo podia ser
+descartada. O prazo de `delegate`, `consensus` e `swarm_run` passou a usar um timer comum, cancelado
+quando a chamada termina.
+
+### Não validado
+
+- macOS.
+- Docker, HTTP atrás de proxy TLS e provedores reais.
+- `MCP_TOOL_TIMEOUT` do Claude Code e o comportamento do shim `.ps1` com `--`.
+
 ## v3.0.0 — auditoria independente em quatro rodadas e correções
 
 Data: 2026-09-13. Ambientes executados: Windows 11 com Node.js v24.16.0 e Ubuntu (WSL2, ext4) com

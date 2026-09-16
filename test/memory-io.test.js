@@ -68,10 +68,19 @@ test('atomic writes retry transient sharing errors and clean up after persistent
 test('unexpected worker failures are reported generically, without paths or messages', async t => {
   const {dir, memory} = await tempMemory(t);
   const registry = {p1: {name: 'p1', baseURL: 'http://p1', apiKey: 'x', keyName: 'X', defaultModel: 'm1', tier: 'free-tier', protocol: 'openai', enabled: true}};
+  const eperm = () => Object.assign(new Error(`EPERM: operation not permitted, rename '${dir}${path.sep}state.json'`), {code: 'EPERM'});
+  // Before any provider call: the worker fails, reported generically.
+  const append = memory.appendEvent.bind(memory);
+  let startFailures = 1;
+  memory.appendEvent = async (projectId, missionId, type, payload) => {
+    if (type === 'delegation_started' && startFailures-- > 0) throw eperm();
+    return append(projectId, missionId, type, payload);
+  };
+  // After a successful provider call (3.1.0): the answer is kept and the failure becomes a sanitized warning.
   const record = memory.recordAgentResult.bind(memory);
-  let failures = 1;
+  let resultFailures = 1;
   memory.recordAgentResult = async (...args) => {
-    if (failures-- > 0) throw Object.assign(new Error(`EPERM: operation not permitted, rename '${dir}${path.sep}state.json'`), {code: 'EPERM'});
+    if (resultFailures-- > 0) throw eperm();
     return record(...args);
   };
   const router = new Router({rotation: ['p1:m1'], policy: 'free-first', maxConcurrency: 2, maxWorkersPerTarget: 2, timeoutMs: 1000, maxContextChars: 20000, maxRetries: 0},
@@ -80,6 +89,10 @@ test('unexpected worker failures are reported generically, without paths or mess
   const failed = out.workers.filter(worker => !worker.ok);
   assert.equal(failed.length, 1);
   assert.equal(failed[0].code, 'internal_error');
+  const kept = out.workers.filter(worker => worker.ok);
+  assert.equal(kept.length, 1);
+  assert.equal(kept[0].content, 'ok');
+  assert.deepEqual(kept[0].memory_warnings, ['agent_result:memory_write_failed']);
   assert.equal(JSON.stringify(out).includes(dir), false);
   assert.equal(JSON.stringify(out).includes('EPERM'), false);
 });

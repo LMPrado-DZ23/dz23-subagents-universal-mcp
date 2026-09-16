@@ -24,11 +24,52 @@ export function toolDefinitions(cfg = {}) {
   return buildTools(toolLimits(cfg));
 }
 
+// Compact JSON: indentation roughly doubled every result that callers pay to read.
 function successResult(value) {
   return {
-    content: [{type: 'text', text: JSON.stringify(value, null, 2)}],
+    content: [{type: 'text', text: JSON.stringify(value)}],
     structuredContent: isPlainObject(value) ? value : {items: value}
   };
+}
+
+const PREVIEW_CHARS = 400;
+const EXCERPT_CHARS = 600;
+const shorten = (text, max) => {
+  const value = String(text ?? '');
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+};
+
+/** Mission state without full agent outputs, which can reach hundreds of kilobytes. */
+export function compactMission(state) {
+  if (!state) return state;
+  const outputs = (state.agent_outputs || []).map(({content, ...rest}) => ({...rest, chars: String(content ?? '').length, preview: shorten(content, PREVIEW_CHARS)}));
+  return {...state, agent_outputs: outputs,
+    ...(state.last_output !== undefined ? {last_output: shorten(state.last_output, PREVIEW_CHARS), last_output_chars: String(state.last_output ?? '').length} : {})};
+}
+
+/** Swarm result for the calling harness: the integration answer in full, each worker as a short excerpt with its cost data. */
+export function summarizeSwarm(result) {
+  return {...result, workers: result.workers.map(worker => (worker.ok
+    ? {ok: true, role: worker.role, provider: worker.provider, model: worker.model, output_chars: worker.content.length, excerpt: shorten(worker.content, EXCERPT_CHARS),
+      usage: worker.usage ?? null, failed_attempts: (worker.attempts || []).length,
+      ...(worker.budget_denials ? {budget_denials: worker.budget_denials} : {}), ...(worker.memory_warnings ? {memory_warnings: worker.memory_warnings} : {})}
+    : worker))};
+}
+
+/**
+ * Runs a billable call with transport cancellation combined with the DZ23_DELEGATE_DEADLINE_MS deadline.
+ * AbortSignal.timeout does not keep the event loop alive, so a call waiting only on the deadline could be
+ * dropped; a regular timer, cleared when the call settles, is used instead.
+ */
+async function withCallSignal(signal, deadlineMs, run) {
+  if (!deadlineMs) return run(signal);
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new DOMException('The operation timed out.', 'TimeoutError')), deadlineMs);
+  try {
+    return await run(signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function toolErrorPayload(error, ctx = {}) {
@@ -42,7 +83,7 @@ export function toolErrorPayload(error, ctx = {}) {
 
 function errorResult(error, ctx) {
   const payload = toolErrorPayload(error, ctx);
-  return {content: [{type: 'text', text: JSON.stringify(payload, null, 2)}], structuredContent: payload, isError: true};
+  return {content: [{type: 'text', text: JSON.stringify(payload)}], structuredContent: payload, isError: true};
 }
 
 function argumentErrorsAsToolResult(mode, ctx) {
@@ -71,6 +112,8 @@ function checkpointSummary(snapshot) {
 
 function toolRunner(router, memory) {
   const withRequest = (args, ctx) => ({...args, request_id: ctx.requestId});
+  const billable = (call, args, ctx) => withCallSignal(ctx.signal, router?.cfg?.delegateDeadlineMs,
+    signal => call({...args, request_id: ctx.requestId, signal}));
   return {
     list_models: async () => { await router.loadProviderStatus?.(); return router.listModels(); },
     provider_inventory: async () => { await router.loadProviderStatus?.(); return router.inventory(); },
@@ -78,15 +121,19 @@ function toolRunner(router, memory) {
     health_check: (_args, ctx) => router.healthCheck({request_id: ctx.requestId}),
     verify_model: (args, ctx) => router.verifyModel(withRequest(args, ctx)),
     project_init: ({project_id, ...fields}) => memory.initProject(project_id, fields),
-    mission_status: async ({project_id, mission_id, events_limit}) => {
+    mission_status: async ({project_id, mission_id, events_limit, include_outputs}) => {
       const journal = await memory.readJournal(project_id, mission_id, events_limit);
-      return {state: await memory.getMission(project_id, mission_id), recent_events: journal.events,
+      const state = await memory.getMission(project_id, mission_id);
+      return {state: include_outputs ? state : compactMission(state), recent_events: journal.events,
         journal_integrity: {invalid_lines: journal.invalid_lines, last_seq: journal.last_seq}};
     },
     memory_checkpoint: async ({project_id, mission_id, merge, ...fields}) => checkpointSummary(await memory.recordCheckpoint(project_id, mission_id, fields, {merge})),
-    delegate: (args, ctx) => router.delegate(withRequest(args, ctx)),
-    consensus: (args, ctx) => router.consensus(withRequest(args, ctx)),
-    swarm_run: (args, ctx) => router.swarmRun(withRequest(args, ctx))
+    delegate: (args, ctx) => billable(input => router.delegate(input), args, ctx),
+    consensus: (args, ctx) => billable(input => router.consensus(input), args, ctx),
+    swarm_run: async ({response_mode, ...args}, ctx) => {
+      const result = await billable(input => router.swarmRun(input), args, ctx);
+      return response_mode === 'full' ? result : summarizeSwarm(result);
+    }
   };
 }
 

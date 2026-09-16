@@ -25,6 +25,15 @@ export function httpSecurityProblem(cfg) {
   return null;
 }
 
+/**
+ * Refusal reason for serving HTTP without any credential. Loopback is not a trust boundary on a machine with other
+ * users, containers, WSL or local malware, and every tool (including billable ones) would be open to them.
+ */
+export function unauthenticatedHttpProblem(cfg) {
+  if (cfg.token || (cfg.scopedTokens || []).length || cfg.allowUnauthenticatedLocalHttp) return null;
+  return 'HTTP requires DZ23_MCP_TOKEN, DZ23_MCP_TOKEN_FILE or scoped tokens even on loopback; set DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP=true only on a single-user machine';
+}
+
 /** The single error envelope for every non-JSON-RPC HTTP response (REST and transport errors). */
 export function errorBody(code, message, ctx, details) {
   return {error: {code, message, ...(ctx?.requestId ? {request_id: ctx.requestId} : {}), ...(details !== undefined ? {details} : {})}};
@@ -159,9 +168,17 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
       case 'GET /api/models': return restTool(res, 'list_models', {}, ctx);
       case 'GET /api/providers': return restTool(res, 'provider_inventory', {}, ctx);
       case 'GET /api/discover': {
-        const args = {refresh: url.searchParams.get('refresh') === 'true'};
+        // GET stays free of side effects: a cross-site <img> must never trigger provider network calls or status writes.
+        if (url.searchParams.get('refresh') === 'true') {
+          return fail(res, 405, 'method_not_allowed', 'Refreshing catalogs calls providers: use POST /api/discover with {"refresh": true}', ctx, undefined, {allow: 'POST'});
+        }
+        const args = {cache_only: true};
         if (url.searchParams.has('provider')) args.provider = url.searchParams.get('provider');
         return restTool(res, 'discover_models', args, ctx);
+      }
+      case 'POST /api/discover': {
+        const body = await jsonBody(req, res, ctx);
+        return body === PARSE_FAILURE ? undefined : restTool(res, 'discover_models', body, ctx);
       }
       case 'GET /api/health':
         return fail(res, 405, 'method_not_allowed', 'health_check is billable: use POST with {"confirm_billable": true}', ctx, undefined, {allow: 'POST'});
@@ -183,6 +200,10 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
   async function handle(req, res, ctx) {
     const started = Date.now();
     res.once('close', () => metrics?.observe('http_request_duration_ms', Date.now() - started, {status: String(res.statusCode)}));
+    const controller = new AbortController();
+    // A client that disconnects before its response is written cancels the tool call it started.
+    res.once('close', () => { if (!res.writableEnded) controller.abort(); });
+    ctx.signal = controller.signal;
     if (state.closing) return fail(res, 503, 'shutting_down', 'Server is shutting down', ctx, undefined, {'retry-after': '1'});
     if (state.inflight >= limits.maxInflight) {
       metrics?.increment('http_rejections_total', {reason: 'inflight'});

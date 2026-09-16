@@ -141,7 +141,8 @@ test('stdio assigns a distinct request_id per message and keeps stdout protocol-
   const result = spawnSync(process.execPath, [path.join(root, 'src', 'index.js'), '--stdio'], {cwd: dir, env, encoding: 'utf8', timeout: 15000, input: `${messages.map(m => JSON.stringify(m)).join('\n')}\n`});
   assert.equal(result.status, 0, result.stderr);
   const stdout = result.stdout.trim().split('\n').map(line => JSON.parse(line));
-  assert.deepEqual(stdout.map(r => r.id), [1, 2, 3]);
+  // Concurrent stdio (3.1.0) writes responses as they complete; every request is still answered exactly once.
+  assert.deepEqual(stdout.map(r => r.id).sort(), [1, 2, 3]);
   const logs = result.stderr.trim().split('\n').filter(Boolean).map(line => JSON.parse(line));
   const calls = logs.filter(entry => entry.event === 'tool_call_completed');
   assert.equal(calls.length, 2);

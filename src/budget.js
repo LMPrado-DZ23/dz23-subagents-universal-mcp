@@ -3,6 +3,8 @@ import {ToolError, ConfigError} from './errors.js';
 import {estimateTokens, normalizeUsage, emptyUsage, roundUsd} from './usage.js';
 
 const PRICE_KEY = /^[a-z0-9][a-z0-9_-]{0,39}:(?:\*|\S{1,200})$/;
+// Failures after which the provider may still have generated (and billed) the answer.
+const CHARGED_FAILURES = new Set(['cancelled', 'provider_timeout']);
 const DEFAULT_BUDGET = Object.freeze({
   missionCostUsd: null, projectCostUsd: null, dailyCostUsd: null, callCostUsd: null,
   missionTokens: null, missionCalls: null, inputTokens: null, policy: 'allow_unknown_cost', prices: {}
@@ -136,6 +138,15 @@ export class BudgetLedger {
 
   buildRecord(reservation, {status, output, kind, target, role, request_id}) {
     const base = {schema: 1, at: new Date(this.clock()).toISOString(), provider: target.name, model: target.model, role, status, ...(request_id ? {request_id} : {}), ...(kind ? {kind} : {})};
+    if (status !== 'success' && CHARGED_FAILURES.has(kind)) {
+      // The request was sent and may have been generated and billed: charge the reservation so cancelling or
+      // timing out a call can never bypass token or cost limits.
+      const input = reservation.inputTokens;
+      const output = Math.max(0, reservation.tokens - reservation.inputTokens);
+      const cost = this.estimateCost(target, input, output);
+      return {...base, input_tokens: input, output_tokens: output, total_tokens: input + output, token_source: 'reserved_estimate',
+        estimated_cost_usd: cost, cost_source: cost === null ? 'unknown' : 'configured_price'};
+    }
     if (status !== 'success') {
       return {...base, input_tokens: 0, output_tokens: 0, total_tokens: 0, token_source: 'none', estimated_cost_usd: null, cost_source: 'unknown'};
     }

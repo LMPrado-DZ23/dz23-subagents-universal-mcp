@@ -11,13 +11,16 @@ import {buildContext} from './context.js';
 import {isPlainObject} from './schema.js';
 import {nullLogger} from './logger.js';
 
-const ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$/;
+// No trailing dot: Windows strips it, so `proj.` and `proj` would share one directory.
+const ID = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,118}[a-zA-Z0-9_-])?$/;
+// Windows device names cannot be directories (with or without an extension) on any drive.
+const RESERVED_ID = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?$/i;
 const CHECKPOINT_LISTS = ['acceptance_criteria', 'decisions', 'invariants', 'completed_tasks', 'active_tasks', 'blocked_tasks', 'next_tasks', 'known_failures', 'files_read', 'files_changed', 'artifacts'];
 const CHECKPOINT_SCALARS = ['next_action', 'status', 'summary', 'goal'];
 
 function safe(value) {
-  if (typeof value !== 'string' || !ID.test(value)) {
-    throw new Error('Invalid memory identifier: use 1-120 letters, digits, dots, underscores or hyphens; start with a letter or digit');
+  if (typeof value !== 'string' || !ID.test(value) || RESERVED_ID.test(value)) {
+    throw new ToolError('invalid_request', 'Invalid memory identifier: use 1-120 letters, digits, dots, underscores or hyphens; start with a letter or digit, do not end with a dot and do not use a Windows device name');
   }
   return value;
 }
@@ -58,7 +61,7 @@ export function mergeCheckpointFields(state, fields, merge = 'append', maxItems 
 
 async function listIds(dir) {
   try {
-    return (await fs.readdir(dir, {withFileTypes: true})).filter(entry => entry.isDirectory() && ID.test(entry.name)).map(entry => entry.name).sort();
+    return (await fs.readdir(dir, {withFileTypes: true})).filter(entry => entry.isDirectory() && ID.test(entry.name) && !RESERVED_ID.test(entry.name)).map(entry => entry.name).sort();
   } catch (error) {
     if (error.code === 'ENOENT') return [];
     throw error;

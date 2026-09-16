@@ -1,5 +1,108 @@
 # Changelog
 
+## 4.0.0 — 2026-09-15 — cost policy, reliable failover, cancellation, concurrent stdio and smaller results
+
+Versão maior, pela mesma regra da 3.0.0: vários padrões mudaram de forma incompatível. Siga o roteiro
+de atualização em `docs/OPERATIONS.md` (serve para 2.2.x e 3.0.0). Nada foi publicado como 3.1.0.
+
+### Mudanças incompatíveis (revise antes de atualizar)
+
+- Provedores `mixed` (openrouter/auto, mistral, together, fireworks, novita, upstage, ollama cloud,
+  hyperbolic, alibaba, gemini) ficam bloqueados sem `DZ23_ALLOW_PAID=true` (motivo `mixed_not_allowed`),
+  exceto modelos listados exatamente em `DZ23_FREE_MODELS` ou modelos `:free` do OpenRouter (o sufixo
+  não libera nada em outros provedores).
+- Adaptadores locais (`custom`, `lmstudio`, `vllm`) apontados para endpoint não privado, ou servindo
+  modelo `:cloud`/`-cloud` (Ollama cloud via servidor local), passam a ser `mixed`.
+- `GITHUB_TOKEN`, `HF_TOKEN`, `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` só habilitam o provedor
+  quando `DZ23_ROTATION` o cita ou com `DZ23_ALLOW_GENERIC_CREDENTIALS=true`. Nomes específicos novos:
+  `GITHUB_MODELS_TOKEN` e `CLOUDFLARE_WORKERS_AI_TOKEN`.
+- Provedores de nuvem só leem endpoint e modelo com prefixo (`DZ23_<PROVIDER>_BASE_URL`/`_MODEL`);
+  `OPENAI_BASE_URL`, `ANTHROPIC_MODEL`, `OLLAMA_BASE_URL`, `GROQ_MODEL` e afins são ignorados porque
+  outras ferramentas os definem. Só `custom`, `lmstudio` e `vllm` mantêm os nomes sem prefixo.
+- Base URL `http://` só é aceita para endpoint privado: IP de loopback ou privado, `localhost`,
+  `host.docker.internal` ou host listado no novo `DZ23_PRIVATE_HOSTS`. Nomes sem ponto e `.local` deixam
+  de contar como privados (LLMNR/mDNS podem ser respondidos por outra máquina da rede).
+- `DZ23_ROUTING_POLICY=ordered` (2.2.x) é aceito como alias de `rotation-order`, com aviso.
+- `--http` não inicia sem `DZ23_MCP_TOKEN`, `DZ23_MCP_TOKEN_FILE` ou tokens com escopo, mesmo em
+  loopback, salvo `DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP=true` (código 78).
+- `GET /api/discover` só lê o cache, mesmo vazio; `?refresh=true` responde 405; atualize catálogos com
+  `POST /api/discover`.
+- `swarm_run` devolve por padrão `response_mode: "summary"`: trecho de até 600 caracteres por worker e
+  a integração completa. `response_mode: "full"` mantém o formato anterior.
+- `mission_status` devolve prévias (até 400 caracteres) das saídas dos agentes; `include_outputs: true`
+  devolve o conteúdo completo.
+- O texto em `content[0].text` é JSON compacto, sem indentação.
+- HTTP 413 e erros 400/422 de contexto grande agora são `context_length_exceeded` (antes
+  `invalid_request`): fazem failover para o próximo alvo, sem retry e sem cooldown. Quando todos os alvos
+  falham assim, o erro da ferramenta é `context_too_large` (REST 413).
+- Identificadores não podem terminar com ponto nem ser nomes de dispositivo do Windows
+  (`CON`, `NUL`, `COM0`–`COM9`, `LPT0`–`LPT9`…); o erro é `invalid_request`.
+- stdio atende requisições em paralelo; respostas chegam na ordem em que terminam (casadas por `id`).
+  Fila de até 256 requisições (`-32003 Server busy` acima disso) e `id` repetido em andamento recebe
+  `-32600`.
+- `.env.example` refeito a partir do código: todos os provedores cadastrados com chave vazia e só as
+  variáveis que o servidor lê.
+
+### Custo e credenciais
+
+- Relatório por alvo com tier e motivo de exclusão (`targetReport`), usado por `doctor`.
+- `discover_models` só contata provedores habilitados.
+
+### Confiabilidade
+
+- Resposta de provedor nunca é descartada por falha de memória depois da chamada: vem com
+  `memory_warnings` (`usage:…`, `agent_result:…`, `event:…`, `handoff:…`).
+- Cancelamento: `notifications/cancelled` no stdio (sem resposta para a requisição cancelada) e
+  desconexão do cliente no HTTP; fila do limitador, espera de retry e backoff respeitam o sinal; uma
+  requisição stdio cancelada enquanto espera vaga nunca roda; SIGINT/SIGTERM abortam as chamadas stdio
+  em andamento. Chamada cancelada ou com timeout depois de enviada é cobrada no orçamento pela reserva
+  (`token_source: "reserved_estimate"`), para que cancelar não burle limites, e não gera cooldown.
+- Prazo total por chamada de `delegate`, `consensus` e `swarm_run`: `DZ23_DELEGATE_DEADLINE_MS`
+  (padrão 600000). Erros `cancelled` (REST 499) e `deadline_exceeded` (REST 504).
+- `DZ23_SHARED_COOLDOWNS` (padrão `true`) grava em `providers/status.json` só cooldowns transitórios
+  (rate limit, quota, indisponibilidade, timeout), compartilhados entre Claude Code, Codex e Hermes no
+  mesmo diretório de estado. Falhas de autenticação ficam no processo: um harness com chave errada não
+  tira o provider dos outros.
+- `Retry-After` e cooldowns lidos do arquivo compartilhado são limitados a 1 hora.
+- O classificador de contexto grande ficou mais estrito (frases como "context: user profile" não
+  disparam mais failover).
+- Registro de uso após sucesso tenta de novo antes de virar `memory_warnings` e a métrica
+  `usage_record_failures_total`.
+- `DZ23_STDIO_MAX_INFLIGHT` (padrão 8) limita requisições simultâneas no stdio.
+
+### Consenso e swarm
+
+- `possible_divergences` no consenso heurístico ("Postgres" vs "Redis", "30 s" vs "90 s", comparações
+  invertidas, "server" vs "serverless"); com divergências a concordância nunca é `high`;
+  `agreement.method` é `lexical_overlap`.
+- O revisor integrador do swarm e a síntese por modelo recebem as respostas desta rodada no prompt
+  (até 24 mil caracteres, com aviso de corte em `routing.warnings`), entre marcadores com nonce
+  aleatório, para que uma resposta não forje o fim do bloco.
+- Cancelamento ou prazo depois dos workers devolve o resultado parcial já pago com `stopped`, sem
+  iniciar integração ou síntese.
+- Falhas de gravação no fim do swarm viram `memory_warnings` em vez de perder as saídas; `swarm_run` e
+  `consensus` juntam no nível superior os avisos de todos os workers. O resumo de cada worker mantém
+  `usage` e `failed_attempts`.
+
+### Ferramentas, CLI e instalação
+
+- Descrições orientam a reutilizar `project_id`/`mission_id`; `roles`, `max_agents` e `models`
+  documentados no schema.
+- `doctor`: checagens `targets`, `cost_policy`, `generic_credentials` e HTTP sem autenticação, dizendo
+  se a rotação veio de `DZ23_ROTATION`; `providers` com colunas TIER, ELIGIBLE e NOTE (variável
+  genérica ignorada, motivo de bloqueio); `config validate` com os novos campos e um resumo.
+- `discover_models.cache_only` lê catálogos em cache sem contatar provedores.
+- Instalador: Codex com `startup_timeout_sec = 30` e `tool_timeout_sec = 900`; comando pronto
+  `claude mcp add -s user` para Claude Code.
+- `DZ23_STATE_DIR` expande `~\` no Windows.
+
+### Código e testes
+
+- Orquestração de consenso e swarm movida para `src/orchestration.js`; `src/endpoints.js` novo.
+- Testes novos: `hardening-policy`, `hardening-runtime`, `hardening-audit`, `cli-diagnostics`. Asserções de ordem no
+  stdio passaram a casar respostas por `id`; o teste de sobreposição do swarm roda sem fsync (ficava
+  instável com a máquina carregada).
+
 ## 3.0.0 — 2026-09-13 — MCP conformance, HTTP security, observability, budgets and memory v2
 
 Versão maior porque há mudanças incompatíveis com 2.2.x. A numeração 2.3.0 foi usada apenas

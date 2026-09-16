@@ -26,7 +26,9 @@ export const AUTH_MODES = Object.freeze(['single-user', 'scoped']);
 // Relative operational weight used by the HTTP rate limiter (overridable by env).
 export const DEFAULT_COST_WEIGHTS = Object.freeze({light: 1, discovery: 3, moderate: 5, billable: 10, expensive: 15, very_expensive: 30});
 
-export const ID_PATTERN = '^[a-zA-Z0-9][a-zA-Z0-9._-]{0,119}$';
+// Windows strips trailing dots from file names, so `proj.` and `proj` would alias the same record.
+export const ID_PATTERN = '^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,118}[a-zA-Z0-9_-])?$';
+export const RESPONSE_MODES = Object.freeze(['summary', 'full']);
 export const PROVIDER_NAME_PATTERN = '^[a-z0-9][a-z0-9_-]{0,39}$';
 export const TARGET_PATTERN = '^(?:auto|[a-z0-9][a-z0-9_-]{0,39}(?::\\S{1,200})?)$';
 // Explicit targets never accept the routing keyword "auto".
@@ -46,12 +48,17 @@ export const RPC_ERRORS = Object.freeze({
 export const PROVIDER_ERROR_KINDS = Object.freeze([
   'rate_limited', 'quota_exhausted', 'billing_required', 'authentication_failed', 'permission_denied',
   'model_not_found', 'endpoint_not_found', 'provider_timeout', 'provider_unavailable', 'invalid_request',
-  'response_invalid', 'provider_error', 'configuration_error'
+  'context_length_exceeded', 'response_invalid', 'provider_error', 'configuration_error'
 ]);
 export const RETRYABLE_KINDS = new Set(['rate_limited', 'provider_timeout', 'provider_unavailable']);
 // Kinds that describe the request itself: trying other providers would repeat the failure.
+// context_length_exceeded is a per-target limit, so it fails over (to a larger context window) instead.
 export const NO_FAILOVER_KINDS = new Set(['invalid_request']);
+// Only failures about the provider's shared state cross processes. Credentials, entitlements and model names come
+// from each harness's own environment, so an auth or model failure in one harness must not block the others.
+export const SHARED_COOLDOWN_KINDS = new Set(['rate_limited', 'quota_exhausted', 'provider_unavailable', 'provider_timeout']);
 export const COOLDOWN_MS = Object.freeze({
+  context_length_exceeded: 0,
   rate_limited: 60_000,
   quota_exhausted: 15 * 60_000,
   billing_required: 15 * 60_000,
