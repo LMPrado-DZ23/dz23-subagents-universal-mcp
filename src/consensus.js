@@ -30,9 +30,20 @@ export function extractClaims(text, max = 80) {
   return claims;
 }
 
+const normalize = text => String(text).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+const hasDigit = word => /\p{N}/u.test(word);
+
 export function claimTokens(text) {
-  const words = String(text).toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').match(/[\p{L}\p{N}]+/gu) || [];
-  return new Set(words.filter(word => word.length >= 3 && !STOPWORDS.has(word) && !NEGATION_TOKENS.has(word)));
+  const words = normalize(text).match(/[\p{L}\p{N}]+/gu) || [];
+  // Numbers are kept whatever their length: "30 seconds" and "90 seconds" are different claims.
+  return new Set(words.filter(word => (word.length >= 3 || hasDigit(word)) && !STOPWORDS.has(word) && !NEGATION_TOKENS.has(word)));
+}
+
+const COMPARISON = /([\p{L}\p{N}][\p{L}\p{N}_.-]*)\s+(?:rather than|instead of|versus|vs\.?|over|em vez de|ao inves de|no lugar de)\s+([\p{L}\p{N}][\p{L}\p{N}_.-]*)/gu;
+
+/** "X rather than Y" pairs; the same pair reversed in another claim is a divergence even with identical words. */
+export function comparisons(text) {
+  return [...normalize(text).matchAll(COMPARISON)].map(match => [match[1].replace(/[.]+$/, ''), match[2].replace(/[.]+$/, '')]);
 }
 
 export function jaccard(a, b) {
@@ -56,8 +67,15 @@ function agreement(analyzed, divergent) {
   return {level: divergent && level === 'high' ? 'medium' : level, score, method: 'lexical_overlap'};
 }
 
-// Inflections of one word ("deploy" / "deploying") are paraphrase, not a different key term.
-const related = (x, y) => x.startsWith(y) || y.startsWith(x) || (x.length >= 5 && y.length >= 5 && x.slice(0, 5) === y.slice(0, 5));
+// Inflections of one word ("deploy" / "deploying") are paraphrase, not a different key term. Numbers never are, and
+// suffixes that invert meaning ("server" / "serverless") make a different term.
+const NEGATING_SUFFIX = /^(?:less|free)$/;
+function related(x, y) {
+  if (hasDigit(x) || hasDigit(y)) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  if (long.startsWith(short)) return !NEGATING_SUFFIX.test(long.slice(short.length));
+  return short.length >= 5 && short.slice(0, 5) === long.slice(0, 5);
+}
 
 /** Key terms only one of two similar claims uses, or null when the difference looks like mere paraphrase. */
 export function divergentTerms(a, b) {
@@ -65,8 +83,17 @@ export function divergentTerms(a, b) {
   const onlyB = [...b].filter(token => !a.has(token));
   const distinctA = onlyA.filter(x => !onlyB.some(y => related(x, y)));
   const distinctB = onlyB.filter(y => !onlyA.some(x => related(x, y)));
-  const keyTerms = list => list.length >= 1 && list.length <= 2 && list.every(token => token.length >= 4);
+  const keyTerms = list => list.length >= 1 && list.length <= 2 && list.every(token => token.length >= 4 || hasDigit(token));
   return keyTerms(distinctA) && keyTerms(distinctB) ? {a: distinctA, b: distinctB} : null;
+}
+
+/** A comparison stated in one claim and reversed in the other ("Postgres rather than Redis" vs the opposite). */
+export function reversedComparison(textA, textB) {
+  const pairsB = comparisons(textB);
+  for (const [x, y] of comparisons(textA)) {
+    if (x !== y && pairsB.some(([p, q]) => p === y && q === x)) return {a: [x], b: [y]};
+  }
+  return null;
 }
 
 /** @param responses successful reviewer answers: [{provider, model, content}] */
@@ -96,7 +123,7 @@ export function heuristicSynthesis(responses) {
             if (j > i) contradictions.push({similarity: round2(similarity), a: {source: response.source, text: claim.text}, b: {source: other.source, text: candidate.text}});
             continue;
           }
-          const terms = divergentTerms(claim.tokens, candidate.tokens);
+          const terms = reversedComparison(claim.text, candidate.text) || divergentTerms(claim.tokens, candidate.tokens);
           if (terms) {
             if (j > i) divergences.push({similarity: round2(similarity), a: {source: response.source, text: claim.text, terms: terms.a}, b: {source: other.source, text: candidate.text, terms: terms.b}});
             continue;

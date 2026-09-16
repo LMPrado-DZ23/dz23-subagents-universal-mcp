@@ -70,6 +70,7 @@ export function throwIfAborted(signal) {
 const TOOL_ERROR_HTTP_STATUS = {
   cancelled: 499,
   deadline_exceeded: 504,
+  context_too_large: 413,
   invalid_arguments: 400,
   invalid_request: 400,
   input_too_large: 413,

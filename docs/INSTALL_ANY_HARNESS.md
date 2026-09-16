@@ -33,8 +33,17 @@ claude mcp get dz23-subagents
 ```
 
 O comando pronto está em `config/generated/claude_code_add_command.txt`. Ao atualizar ou trocar de
-pasta, rode antes `claude mcp remove -s user dz23-subagents`: não mantenha duas entradas apontando
-para versões diferentes. `claude mcp get` deve mostrar o Node e o `src/index.js` da pasta nova.
+pasta, rode antes `claude mcp get dz23-subagents` e anote o Environment: `claude mcp remove` apaga essas
+variáveis. Depois `claude mcp remove -s user dz23-subagents` e o novo `add`, com `-e CHAVE=VALOR` para cada
+variável que deve continuar no harness (ou mova-as para o `.env` da instalação). Não mantenha duas
+entradas apontando para versões diferentes. `claude mcp get` deve mostrar o Node e o `src/index.js`
+da pasta nova.
+
+`swarm_run` e `consensus` podem levar minutos. No Claude Code, o timeout de ferramentas MCP vem da
+variável `MCP_TOOL_TIMEOUT` (milissegundos, por exemplo `900000`) no ambiente em que o Claude Code é
+iniciado; mantenha-o acima de `DZ23_DELEGATE_DEADLINE_MS`. No PowerShell, quando `claude` é um shim
+`.ps1` do npm, o `--` do comando pode precisar de aspas (`'--'`) ou de `--%`; isso não foi verificado
+em todas as instalações.
 
 ## Codex
 
@@ -80,9 +89,10 @@ uma única instância remota. Compartilhamento de arquivos exige locks coerentes
 eventual bidirecional (copiar JSONs em ambas as direções) não é um mecanismo de coordenação.
 Todos os processos que usam o mesmo diretório devem rodar a mesma versão do servidor.
 
-Com `DZ23_SHARED_COOLDOWNS=true` (padrão), cooldowns de provider (rate limit, quota, autenticação)
-ficam em `<estado>/providers/status.json`: Claude Code, Codex e Hermes pulam um alvo que outro
-processo acabou de ver falhar.
+Com `DZ23_SHARED_COOLDOWNS=true` (padrão), cooldowns transitórios de provider (rate limit, quota,
+indisponibilidade, timeout) ficam em `<estado>/providers/status.json`: Claude Code, Codex e Hermes pulam
+um alvo que outro processo acabou de ver falhar. Falhas de autenticação ou de modelo continuam
+restritas ao processo que as viu.
 
 O segundo harness chama `mission_status` com os mesmos `project_id`/`mission_id` e compara
 branch/commit/arquivos por conta própria. O MCP não instala ou inicia automaticamente um harness

@@ -45,10 +45,13 @@ not hidden model thoughts or unrecorded client conversations.
 
 Without `DZ23_ALLOW_PAID=true`, `paid` and `low-cost` targets are blocked, and so are `mixed` targets
 (OpenRouter, Gemini, Mistral, Together, Fireworks, Novita, Upstage, Ollama cloud, Hyperbolic, Alibaba,
-and local adapters pointed at a public host), because those providers bill some models. A mixed model
-runs only when its id ends with `:free` or its exact `provider:model` is listed in `DZ23_FREE_MODELS`;
-list only models that are really free for your account. `doctor` shows every target as `eligible` or
-`skipped(reason)`. Tiers are static labels, not proof that usage is free.
+and local adapters pointed at a non-private host), because those providers bill some models. A mixed
+model runs only when its exact `provider:model` is listed in `DZ23_FREE_MODELS` or it is an OpenRouter
+`:free` model; list only models that are really free for your account. `:cloud` models served through a
+local Ollama count as mixed. Private endpoints are loopback/private IPs, `localhost`,
+`host.docker.internal` and hosts listed in `DZ23_PRIVATE_HOSTS`. `doctor` shows every target as
+`eligible` or `skipped(reason)`. Tiers are static labels, not proof that usage is free: free-tier
+providers can bill beyond the free quota.
 
 ## Setup
 
@@ -80,12 +83,17 @@ work over.
 ## Upgrading
 
 From 2.2.x or 3.0.0 (Windows runbook in [docs/OPERATIONS.md](docs/OPERATIONS.md#atualizando-de-22x300-para-400)):
-close all harnesses and stop the server processes; back up the state directory; extract 4.0.0 to a new
-folder and copy the old `.env`; review the variable changes (`DZ23_FREE_MODELS` for mixed rotation
-entries, `GITHUB_TOKEN` → `GITHUB_MODELS_TOKEN`, `DZ23_OPENAI_*`/`DZ23_ANTHROPIC_*` instead of
-`OPENAI_BASE_URL`/`OPENAI_MODEL`/`ANTHROPIC_*`, HTTPS base URLs, an HTTP token); run `config validate`
-and `doctor`; replace both harness entries; restart and run a cheap check (`list_models`,
-`mission_status`). Do not run old and new servers side by side on the same state directory.
+record each harness's environment (`claude mcp get`, the Codex table) and effective state directory;
+close all harnesses and stop only the DZ23 server processes; back up every state directory, the `.env`
+files, `~/.codex/config.toml` and `~/.claude.json`; extract 4.0.0 to a new folder and copy the old `.env`
+(`.env.example` lists every provider key and supported variable); choose one `DZ23_STATE_DIR`; review
+the variable changes (`DZ23_ROUTING_POLICY=ordered` → `rotation-order`, `DZ23_FREE_MODELS` for mixed
+rotation entries, `GITHUB_TOKEN` → `GITHUB_MODELS_TOKEN`, `CLOUDFLARE_API_TOKEN` →
+`CLOUDFLARE_WORKERS_AI_TOKEN`, `DZ23_<PROVIDER>_BASE_URL`/`_MODEL` for cloud providers, `DZ23_PRIVATE_HOSTS`
+for plain-HTTP LAN hosts, an HTTP token); run `config validate` and `doctor` with the harness's
+environment; replace both harness entries, re-adding harness env with `claude mcp add -e`; restart and
+run a cheap check (`list_models`, `mission_status`). Do not run old and new servers side by side on
+the same state directory.
 
 ## Boundaries
 

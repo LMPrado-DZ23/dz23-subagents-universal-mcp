@@ -47,11 +47,12 @@ export function compactMission(state) {
     ...(state.last_output !== undefined ? {last_output: shorten(state.last_output, PREVIEW_CHARS), last_output_chars: String(state.last_output ?? '').length} : {})};
 }
 
-/** Swarm result for the calling harness: the integration answer in full, each worker as a short excerpt. */
+/** Swarm result for the calling harness: the integration answer in full, each worker as a short excerpt with its cost data. */
 export function summarizeSwarm(result) {
   return {...result, workers: result.workers.map(worker => (worker.ok
     ? {ok: true, role: worker.role, provider: worker.provider, model: worker.model, output_chars: worker.content.length, excerpt: shorten(worker.content, EXCERPT_CHARS),
-      ...(worker.memory_warnings ? {memory_warnings: worker.memory_warnings} : {})}
+      usage: worker.usage ?? null, failed_attempts: (worker.attempts || []).length,
+      ...(worker.budget_denials ? {budget_denials: worker.budget_denials} : {}), ...(worker.memory_warnings ? {memory_warnings: worker.memory_warnings} : {})}
     : worker))};
 }
 

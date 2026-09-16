@@ -54,6 +54,9 @@ export const RETRYABLE_KINDS = new Set(['rate_limited', 'provider_timeout', 'pro
 // Kinds that describe the request itself: trying other providers would repeat the failure.
 // context_length_exceeded is a per-target limit, so it fails over (to a larger context window) instead.
 export const NO_FAILOVER_KINDS = new Set(['invalid_request']);
+// Only failures about the provider's shared state cross processes. Credentials, entitlements and model names come
+// from each harness's own environment, so an auth or model failure in one harness must not block the others.
+export const SHARED_COOLDOWN_KINDS = new Set(['rate_limited', 'quota_exhausted', 'provider_unavailable', 'provider_timeout']);
 export const COOLDOWN_MS = Object.freeze({
   context_length_exceeded: 0,
   rate_limited: 60_000,

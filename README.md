@@ -85,11 +85,13 @@ configuração existente, executa a regressão e gera snippets.
 realiza as mesmas etapas.
 
 **Já tem 2.2.x ou 3.0.0 instalado?** Siga o [roteiro de atualização](docs/OPERATIONS.md#atualizando-de-22x300-para-400):
-backup do estado, pasta nova, revisão do `.env`, `config validate`/`doctor` e substituição das entradas
-nos harnesses.
+levantar o ambiente e o diretório de estado de cada harness, backup completo, pasta nova, revisão do
+`.env`, `config validate`/`doctor` e substituição das entradas nos harnesses.
 
-O repositório contém **somente `.env.example`**. O processo lê o `.env` da instalação,
-não o do projeto do harness. Exemplo inicial com um servidor local que você precisa iniciar:
+O repositório contém **somente `.env.example`**, com todos os provedores cadastrados (chave vazia) e
+todas as variáveis suportadas: copie para `.env` e preencha só as chaves que tiver. O processo lê o
+`.env` da instalação, não o do projeto do harness. Exemplo inicial com um servidor local que você
+precisa iniciar:
 
 ```env
 DZ23_ROTATION=custom:qwen3-coder
@@ -106,9 +108,10 @@ Para nuvem: configure a chave em privado, rode `discover_models`, confirme com
 `free-first` apenas ordena categorias. `DZ23_ALLOW_PAID=false` bloqueia `paid` e `low-cost`,
 inclusive alvos explícitos e, sem `DZ23_ROTATION`, modelos que não sejam o padrão do provider.
 Também bloqueia `mixed` (OpenRouter, Gemini, Mistral, Together, Ollama cloud e outros que cobram
-alguns modelos), exceto ids terminados em `:free` ou `provider:modelo` listados em `DZ23_FREE_MODELS`:
-declare ali só modelos realmente gratuitos na sua conta. `doctor` mostra cada alvo como `eligible` ou
-`skipped(motivo)`.
+alguns modelos), exceto `provider:modelo` listados em `DZ23_FREE_MODELS` ou modelos `:free` do
+OpenRouter: declare ali só modelos realmente gratuitos na sua conta. Modelos `:cloud` servidos por um
+Ollama local também contam como `mixed`, e `free-tier` pode cobrar acima da cota grátis. `doctor`
+mostra cada alvo como `eligible` ou `skipped(motivo)`.
 Para limitar gasto, defina uma tabela de preços (`DZ23_PRICES_FILE`) e limites como
 `DZ23_MAX_DAILY_COST_USD`, `DZ23_MAX_MISSION_COST_USD` ou `DZ23_MAX_MISSION_CALLS`; com limite de
 custo, chamadas de custo desconhecido são negadas por padrão (`DZ23_COST_POLICY`).

@@ -28,35 +28,37 @@ Um campo de modelo vazio exige MODEL configurado ou alvo provider:model explíci
 | `ollama` | OpenAI-compatible | `OLLAMA_API_KEY` | `https://ollama.com/v1` | `` | mixed |
 | `hyperbolic` | OpenAI-compatible | `HYPERBOLIC_API_KEY` | `https://api.hyperbolic.xyz/v1` | `` | mixed |
 | `alibaba` | OpenAI-compatible | `ALIBABA_API_KEY` | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` | `qwen-plus` | mixed |
-| `cloudflare` | OpenAI-compatible | `CLOUDFLARE_API_TOKEN` (genérica: `CLOUDFLARE_AUTH_TOKEN`) | `` | `@cf/openai/gpt-oss-120b` | free-tier |
+| `cloudflare` | OpenAI-compatible | `CLOUDFLARE_WORKERS_AI_TOKEN` (genéricas: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_AUTH_TOKEN`) | `` | `@cf/openai/gpt-oss-120b` | free-tier |
 | `custom` | OpenAI-compatible | `CUSTOM_API_KEY` | `http://127.0.0.1:11434/v1` | `qwen3-coder` | local |
 | `lmstudio` | OpenAI-compatible | `LMSTUDIO_API_KEY` | `http://127.0.0.1:1234/v1` | `local-model` | local |
 | `vllm` | OpenAI-compatible | `VLLM_API_KEY` | `http://127.0.0.1:8000/v1` | `local-model` | local |
 
-Cloudflare usa CLOUDFLARE_ACCOUNT_ID ou CLOUDFLARE_BASE_URL. O endpoint da tabela
+Cloudflare usa `CLOUDFLARE_ACCOUNT_ID` ou `DZ23_CLOUDFLARE_BASE_URL`. O endpoint da tabela
 fica vazio enquanto a conta não é configurada. Alibaba usa variáveis próprias,
 não sobrescreve as de OpenAI. O nome `ollama` refere-se ao endpoint cloud; Ollama
 local usa `custom` com endpoint local. LM Studio e vLLM também exigem servidor rodando.
 
-`DZ23_<PROVIDER>_BASE_URL` e `DZ23_<PROVIDER>_MODEL` (provider em maiúsculas) sobrescrevem as
-sugestões e têm precedência sobre os nomes antigos `<PROVIDER>_BASE_URL`/`<PROVIDER>_MODEL`. Para
-`openai` e `anthropic` só valem os nomes com prefixo: `OPENAI_BASE_URL`, `OPENAI_MODEL`,
-`ANTHROPIC_BASE_URL` e `ANTHROPIC_MODEL` são ignorados. `http://` só é aceito para loopback ou rede
-privada; os demais endereços exigem HTTPS. `<CHAVE>_FILE` lê um arquivo de segredo; arquivo ilegível
-falha explicitamente. Together aceita o alias TogetherAIAPI_KEY.
+Provedores de nuvem só aceitam sobrescrever endpoint e modelo com `DZ23_<PROVIDER>_BASE_URL` e
+`DZ23_<PROVIDER>_MODEL` (provider em maiúsculas); nomes sem prefixo (`OPENAI_BASE_URL`,
+`OLLAMA_BASE_URL`, `GROQ_MODEL`...) são ignorados. Os adapters locais aceitam também os nomes antigos
+`CUSTOM_BASE_URL`, `LMSTUDIO_BASE_URL`, `VLLM_BASE_URL` e `*_MODEL`. `http://` só é aceito para endpoint
+privado (IP de loopback ou privado, `localhost`, `host.docker.internal` ou host em `DZ23_PRIVATE_HOSTS`);
+os demais endereços exigem HTTPS. `<CHAVE>_FILE` lê um arquivo de segredo; arquivo ilegível falha
+explicitamente. Together aceita o alias TogetherAIAPI_KEY.
 
-Credenciais genéricas (`GITHUB_TOKEN`, `HF_TOKEN`, `CLOUDFLARE_AUTH_TOKEN`) só habilitam o provider
-quando `DZ23_ROTATION` o cita ou com `DZ23_ALLOW_GENERIC_CREDENTIALS=true`; caso contrário o inventário
-mostra `ignored_credential_source` com o nome da variável. `discover_models` só consulta providers
-habilitados.
+Credenciais genéricas (`GITHUB_TOKEN`, `HF_TOKEN`, `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_AUTH_TOKEN`) só
+habilitam o provider quando `DZ23_ROTATION` o cita ou com `DZ23_ALLOW_GENERIC_CREDENTIALS=true`; caso
+contrário o inventário mostra `ignored_credential_source` com o nome da variável. `discover_models` só
+consulta providers habilitados.
 
 ## Categoria de roteamento e política de custo
 
 Sem `DZ23_ALLOW_PAID=true`: `paid` e `low-cost` são pulados (`paid_not_allowed`); `mixed` é pulado
-(`mixed_not_allowed`), exceto quando o id do modelo termina em `:free` ou `provider:modelo` está em
-`DZ23_FREE_MODELS`; `local` e `free-tier` são permitidos. Um adapter local (`custom`, `lmstudio`,
-`vllm`) apontado para host que não é loopback nem rede privada passa a `mixed`. `doctor` mostra cada
-alvo com tier e motivo; `providers` inclui a coluna `TIER`.
+(`mixed_not_allowed`), exceto quando `provider:modelo` está em `DZ23_FREE_MODELS` ou é um modelo `:free`
+do OpenRouter; `local` e `free-tier` são permitidos. Um adapter local (`custom`, `lmstudio`, `vllm`)
+apontado para endpoint que não é privado passa a `mixed`, e um modelo `:cloud`/`-cloud` servido por
+adapter local também. `doctor` mostra cada alvo com tier e motivo; `providers` inclui as colunas `TIER`,
+`ELIGIBLE` e `NOTE`. Tiers são rótulos fixos: `free-tier` pode cobrar acima da cota grátis da conta.
 
 ## Estados de um provider
 
@@ -94,10 +96,14 @@ corpo (que nunca é devolvido ou gravado).
 - Cooldown: 60 s para `rate_limited`, `response_invalid` e `provider_error`; 30 s para timeout e
   indisponibilidade; 15 min para quota, cobrança, autenticação, permissão, modelo, endpoint e
   configuração; nenhum para `invalid_request` e `context_length_exceeded`. Um `Retry-After` maior
-  prolonga o cooldown.
-- Com `DZ23_SHARED_COOLDOWNS=true` (padrão), cooldowns de rate limit, quota e falhas de autenticação
-  são persistidos em `<estado>/providers/status.json`; outros processos que usam o mesmo diretório
-  (Claude Code, Codex, Hermes) pulam o alvo até o fim do cooldown.
+  prolonga o cooldown, até no máximo 1 hora.
+- Quando todos os alvos falham com `context_length_exceeded`, a ferramenta devolve
+  `context_too_large` em vez de `all_providers_failed`.
+- Com `DZ23_SHARED_COOLDOWNS=true` (padrão), cooldowns transitórios (`rate_limited`, `quota_exhausted`,
+  `provider_unavailable`, `provider_timeout`) são persistidos em `<estado>/providers/status.json`; outros
+  processos que usam o mesmo diretório (Claude Code, Codex, Hermes) pulam o alvo até o fim do cooldown.
+  Falhas de autenticação, permissão, cobrança e modelo não são compartilhadas, porque cada harness pode
+  ter credenciais próprias.
 
 ## Capabilities
 

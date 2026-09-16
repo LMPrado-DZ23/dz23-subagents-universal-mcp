@@ -6,7 +6,9 @@ const QUOTA = /insufficient_quota|exceeded your current quota|quota (?:exceeded|
 const AUTH = /invalid[ _-]?(?:api[ _-]?key|token|credentials?)|incorrect api key|unauthori[sz]ed|authentication/;
 const MODEL = /model[^.]{0,80}(?:not[ _-]?found|does not exist|unknown|not available|unsupported|decommissioned|deprecated)|no such model|model_not_found|invalid model|unknown model/;
 const LEGACY_KINDS = {quota_or_rate_limit: 429, auth_or_entitlement: 401, model_or_endpoint_missing: 404};
-const CONTEXT = /context[ _-]?(?:length|window)|maximum context|too many (?:input )?tokens|(?:prompt|input|message|request|payload)s? (?:is |are )?too (?:long|large)|reduce the length|exceeds? the (?:maximum|max(?:imum)? allowed)/;
+// Size wording must name the context, the prompt/input or tokens: "temperature exceeds the maximum" or a
+// "max_tokens exceeds the maximum allowed" parameter error is a request error, not a per-target size limit.
+const CONTEXT = /maximum context length|context[ _-]?(?:length|window)[^.]{0,60}(?:exceed|too (?:long|large)|limit)|(?:prompt|input|messages?) (?:is |are )?too (?:long|large)|reduce the length of the (?:messages?|prompt|input)|(?:too many|exceeds?[^.]{0,40}) (?:input )?\btokens?\b[^.]{0,40}(?:context|limit|maximum|allowed)|input token count/;
 const RATE = /rate[ _-]?limit|tokens? per minute|requests? per minute|\b[tr]pm\b/;
 // A size complaint wins over a rate wording: Groq answers "Request too large ... tokens per minute (TPM)" when one
 // request exceeds the per-minute budget, and retrying the same target can never succeed.
@@ -32,12 +34,15 @@ export function classifyHttpFailure(status, body = '') {
   return 'provider_error';
 }
 
+// A provider (or anything in front of it) must not be able to disable a target for days with one header.
+export const MAX_RETRY_AFTER_MS = 60 * 60_000;
+
 export function parseRetryAfter(value, now = Date.now()) {
   if (!value) return 0;
   const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.max(0, Math.round(seconds * 1000));
+  if (Number.isFinite(seconds)) return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, Math.round(seconds * 1000)));
   const date = Date.parse(value);
-  return Number.isFinite(date) ? Math.max(0, date - now) : 0;
+  return Number.isFinite(date) ? Math.min(MAX_RETRY_AFTER_MS, Math.max(0, date - now)) : 0;
 }
 
 /**
@@ -51,7 +56,7 @@ export class ProviderError extends Error {
     this.name = 'ProviderError';
     this.kind = safeKind;
     this.retryable = RETRYABLE_KINDS.has(safeKind);
-    this.retryAfterMs = Math.max(0, retryAfterMs || 0);
+    this.retryAfterMs = Math.min(MAX_RETRY_AFTER_MS, Math.max(0, retryAfterMs || 0));
     this.provider = provider;
     this.model = model;
     if (status) this.status = status;

@@ -71,13 +71,17 @@ test('responses to unauthenticated requests close the connection; authenticated 
 
 test('private endpoint detection parses addresses instead of matching hostname text', () => {
   for (const url of ['http://127.0.0.1:11434/v1', 'http://10.1.2.3/v1', 'http://172.31.255.1/v1', 'http://192.168.0.9/v1', 'http://[::1]:8000/v1',
-    'http://[fd12:3456::1]/v1', 'http://localhost:1234/v1', 'http://host.docker.internal:11434/v1', 'http://ollama:11434/v1', 'http://gpu-box.local:8000/v1']) {
+    'http://[fd12:3456::1]/v1', 'http://localhost:1234/v1', 'http://host.docker.internal:11434/v1']) {
     assert.equal(isPrivateEndpoint(url), true, url);
   }
+  // 4.0.0: single-label and .local names resolve through LLMNR/NetBIOS/mDNS, which a LAN host can spoof; they are
+  // private only when listed in DZ23_PRIVATE_HOSTS.
   for (const url of ['http://10.0.0.1.evil.com/v1', 'http://127.0.0.1.nip.io/v1', 'http://evil.localhost/v1', 'http://172.15.0.1/v1',
-    'http://192.169.0.1/v1', 'https://api.openai.com/v1', 'http://[2001:db8::1]/v1']) {
+    'http://192.169.0.1/v1', 'https://api.openai.com/v1', 'http://[2001:db8::1]/v1', 'http://ollama:11434/v1', 'http://gpu-box.local:8000/v1']) {
     assert.equal(isPrivateEndpoint(url), false, url);
   }
+  assert.equal(isPrivateEndpoint('http://ollama:11434/v1', ['ollama']), true);
+  assert.equal(isPrivateEndpoint('http://gpu-box.local:8000/v1', ['gpu-box.local']), true);
 });
 
 test('case aliases are still refused when the exact id was cached by another store instance', async t => {

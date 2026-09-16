@@ -77,7 +77,8 @@ export function buildTools(limits = toolLimits()) {
       description: 'Query provider /models catalogs (cached five minutes). A catalog entry does not prove inference access.',
       inputSchema: object({
         provider: {type: 'string', pattern: PROVIDER_NAME_PATTERN, 'x-pattern-reason': 'must be a registered provider name', description: 'Limit discovery to one provider.'},
-        refresh: {type: 'boolean', default: false, description: 'Bypass the five-minute catalog cache.'}
+        refresh: {type: 'boolean', default: false, description: 'Bypass the five-minute catalog cache.'},
+        cache_only: {type: 'boolean', default: false, description: 'Return cached catalogs only; never contact a provider.'}
       }), annotations: annotations('Discover models', {readOnly: true, openWorld: true})},
     {name: 'health_check', title: 'Health check (billable)',
       description: 'Run a tiny real generation on every eligible target in parallel. Requires confirm_billable=true; may consume provider quota or credits.',
@@ -93,7 +94,7 @@ export function buildTools(limits = toolLimits()) {
         max_output_tokens: {type: 'integer', minimum: 1, maximum: 32, default: 8, description: 'Output token cap for the generation.'}
       }, ['target', 'confirm_billable']), annotations: annotations('Verify model inference (billable)', {openWorld: true})},
     {name: 'project_init', title: 'Initialize project memory',
-      description: 'Create or update shared project metadata. Does not clone or read the repository.',
+      description: 'Create or update shared project metadata. Does not clone or read the repository. Use one stable project_id per repository and pass it to every later tool call.',
       inputSchema: object({
         project_id: projectId,
         workspace: plain(1024, 'Workspace path as recorded by the harness.'),
@@ -108,7 +109,7 @@ export function buildTools(limits = toolLimits()) {
         include_outputs: {type: 'boolean', default: false, description: 'Return full stored agent outputs instead of previews (can be very large).'}
       }, ['project_id', 'mission_id']), annotations: annotations('Mission status', {readOnly: true, idempotent: true})},
     {name: 'memory_checkpoint', title: 'Memory checkpoint',
-      description: 'Persist a structured handoff checkpoint for another harness or agent. Creates the mission when absent.',
+      description: 'Persist a structured handoff checkpoint for another harness or agent. Creates the mission when absent. Use the same project_id and mission_id the task used for delegate, consensus and swarm_run.',
       inputSchema: object({
         project_id: projectId, mission_id: missionId,
         next_action: plain(4000, 'Concrete next step for whoever resumes.'),

@@ -78,7 +78,11 @@ export async function serve(argv = []) {
     hardStop.unref();
     try {
       if (server) await server.shutdown(cfg.shutdownGraceMs);
-      else if (stdio) await Promise.race([stdio.idle(), new Promise(resolve => setTimeout(resolve, cfg.shutdownGraceMs).unref())]);
+      else if (stdio) {
+        // Stop paid work first; cancelled calls settle their usage records while idle() waits within the grace period.
+        stdio.abortAll();
+        await Promise.race([stdio.idle(), new Promise(resolve => setTimeout(resolve, cfg.shutdownGraceMs).unref())]);
+      }
     } finally {
       logger.info('shutdown_completed', {signal});
       process.exit(0);

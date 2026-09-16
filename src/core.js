@@ -1,9 +1,9 @@
 import crypto from 'node:crypto';
 import {ConcurrencyLimiter} from './concurrency.js';
 import {providerRegistry, parseTarget, callProvider, discoverModels, catalogCapabilities} from './providers.js';
-import {toProviderError} from './provider-errors.js';
+import {toProviderError, MAX_RETRY_AFTER_MS} from './provider-errors.js';
 import {ToolError, safeText, abortError, throwIfAborted} from './errors.js';
-import {COOLDOWN_MS, NO_FAILOVER_KINDS, ROLES, SWARM_ROLES} from './constants.js';
+import {COOLDOWN_MS, NO_FAILOVER_KINDS, ROLES, SHARED_COOLDOWN_KINDS, SWARM_ROLES} from './constants.js';
 import {eligibleTargets, isEligible, ineligibleReason, modelAllowed, targetKey, withRotationOptIn} from './targets.js';
 import {buildMessages} from './prompts.js';
 import {nullLogger} from './logger.js';
@@ -18,10 +18,12 @@ const allowedRoles = new Set(ROLES);
 const isoNow = () => new Date().toISOString();
 // Only this server's own codes are reported; raw errno codes and messages can carry paths.
 const errorCode = error => (error instanceof ToolError ? error.code : 'memory_write_failed');
-// Retry backoff ends early when the call is cancelled; the caller then checks the signal.
+// Retry backoff ends early when the call is (or already was) cancelled; the caller then checks the signal.
 const realSleep = (ms, signal) => new Promise(resolve => {
-  const timer = setTimeout(resolve, ms);
-  signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, {once: true});
+  if (signal?.aborted) return resolve();
+  const onAbort = () => { clearTimeout(timer); resolve(); };
+  const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+  signal?.addEventListener('abort', onAbort, {once: true});
 });
 
 function assertRole(role) {
@@ -154,9 +156,9 @@ export class Router {
     const base = COOLDOWN_MS[normalized.kind] ?? 60_000;
     if (!base) return;
     const now = this.clock();
-    const entry = {at: now, until: now + Math.max(base, normalized.retryAfterMs), kind: normalized.kind};
+    const entry = {at: now, until: now + Math.min(MAX_RETRY_AFTER_MS, Math.max(base, normalized.retryAfterMs)), kind: normalized.kind};
     boundedSet(this.exhausted, targetKey(target), entry);
-    if (!this.cfg.sharedCooldowns || !this.memory.updateProviderStatus) return;
+    if (!this.cfg.sharedCooldowns || !SHARED_COOLDOWN_KINDS.has(entry.kind) || !this.memory.updateProviderStatus) return;
     try {
       await this.recordProviderStatus(target.name, current => {
         const kept = Object.entries(current.cooldowns || {}).filter(([model, value]) => model !== target.model && value?.until > now).slice(-63);
@@ -180,8 +182,9 @@ export class Router {
     for (const [provider, status] of Object.entries(this.providerStatus || {})) {
       for (const [model, value] of Object.entries(status?.cooldowns || {})) {
         const key = `${provider}:${model}`;
-        if (Number.isFinite(value?.until) && value.until > now && (this.exhausted.get(key)?.until || 0) < value.until) {
-          boundedSet(this.exhausted, key, {at: now, until: value.until, kind: safeText(value.kind, 40), shared: true});
+        if (SHARED_COOLDOWN_KINDS.has(value?.kind) && Number.isFinite(value.until) && value.until > now && (this.exhausted.get(key)?.until || 0) < value.until) {
+          // A shared file can be stale or tampered with: never adopt more than the maximum cooldown.
+          boundedSet(this.exhausted, key, {at: now, until: Math.min(value.until, now + MAX_RETRY_AFTER_MS), kind: value.kind, shared: true});
         }
       }
     }
@@ -237,13 +240,15 @@ export class Router {
     }));
   }
 
-  async discover({provider, refresh = false} = {}) {
+  async discover({provider, refresh = false, cache_only = false} = {}) {
     // Discovery only contacts enabled providers: naming a disabled local adapter must not probe default local ports.
     const targets = (provider ? [this.registry[provider]] : Object.values(this.registry)).filter(x => x?.enabled);
     const out = [];
     for (const base of targets) {
       const target = {...base, model: base.defaultModel};
       const cached = this.discoveryCache.get(target.name);
+      // cache_only never contacts a provider or writes status (REST GET), whatever the cache age.
+      if (cache_only) { if (cached) out.push({...cached.value, cached_at: new Date(cached.at).toISOString()}); continue; }
       if (cached && !refresh && this.clock() - cached.at < 5 * 60_000) { out.push(cached.value); continue; }
       const found = await this.discoverer(target, {timeoutMs: this.cfg.healthTimeoutMs});
       const value = {provider: target.name, base_url: target.baseURL, ok: found.ok, models: found.models || [], count: found.models?.length || 0, kind: found.kind, error: found.error};
@@ -374,12 +379,17 @@ export class Router {
         const latencyMs = this.clock() - callStarted;
         const memoryWarnings = [];
         let usage = null;
-        try {
-          usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
-        } catch (failure) {
-          // The provider already answered (and may have billed): bookkeeping failures never discard the answer.
-          memoryWarnings.push(`usage:${errorCode(failure)}`);
-          log.warn('usage_record_failed', {provider: target.name, model: target.model, code: errorCode(failure), error_name: failure?.name});
+        // The provider already answered (and may have billed): bookkeeping failures never discard the answer.
+        // Settlement is retried once (it is idempotent), because a lost record under-enforces budgets.
+        for (let settleAttempt = 1; settleAttempt <= 2 && !usage; settleAttempt++) {
+          try {
+            usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
+          } catch (failure) {
+            if (settleAttempt < 2) continue;
+            memoryWarnings.push(`usage:${errorCode(failure)}`);
+            this.metrics?.increment('usage_record_failures_total');
+            log.warn('usage_record_failed', {provider: target.name, model: target.model, code: errorCode(failure), error_name: failure?.name});
+          }
         }
         log.info('provider_call_completed', {provider: target.name, model: target.model, attempt, duration_ms: latencyMs, status: 'success',
           input_tokens: usage?.input_tokens, output_tokens: usage?.output_tokens, token_source: usage?.token_source, estimated_cost_usd: usage?.estimated_cost_usd, cost_source: usage?.cost_source});
@@ -438,7 +448,12 @@ export class Router {
       await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'budget_exceeded', request_id});
       throw new ToolError('budget_exceeded', 'No eligible target fits the configured budget or cost policy', {limit: 'target_policy', denials});
     }
-    await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'all_providers_failed', failed_attempts: attempts.length, request_id});
+    // Every target said the input is too large: tell the caller to shrink it instead of reporting generic outages.
+    const reason = attempts.length && attempts.every(item => item.kind === 'context_length_exceeded') ? 'context_too_large' : 'all_providers_failed';
+    await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason, failed_attempts: attempts.length, request_id});
+    if (reason === 'context_too_large') {
+      throw new ToolError('context_too_large', 'Every eligible target rejected the input as too large; shorten the prompt or start a new mission with less context', {attempts});
+    }
     throw new ToolError('all_providers_failed', 'All eligible providers failed', {attempts, ...(denials.length ? {budget_denials: denials} : {})});
   }
 

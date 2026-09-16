@@ -168,75 +168,129 @@ a desconexão do cliente aborta a chamada. `delegate`, `consensus` e `swarm_run`
 ## Atualizando de 2.2.x/3.0.0 para 4.0.0
 
 Vale para 2.2.x e 3.0.0: os passos e a revisão de variáveis são os mesmos. Os comandos são para
-Windows (PowerShell). Cenário comum: duas instalações, uma registrada no Claude Code e outra no Codex,
-ambas usando `~\.dz23-subagents`. Servidores de versões diferentes não devem rodar ao
-mesmo tempo sobre o mesmo diretório de estado durante a atualização: atualize as duas antes de reabrir
-qualquer harness.
+Windows (PowerShell). Cenário comum: duas instalações, uma registrada no Claude Code e outra no Codex.
+Elas podem ter `.env`, variáveis no próprio harness e diretórios de estado **diferentes**; descubra isso
+antes de mudar qualquer coisa. Servidores de versões diferentes não devem rodar ao mesmo tempo sobre o
+mesmo diretório de estado: atualize as duas antes de reabrir qualquer harness.
 
-1. **Pare tudo.** Feche Claude Code, Codex, Hermes e outros clientes. Liste os processos do servidor e
-   encerre apenas os que apontam para as pastas do DZ23 Subagents (confira a linha de comando):
+0. **Levante a configuração atual** (só leitura):
+
+   ```powershell
+   claude mcp get dz23-subagents   # anote Command, Args e Environment
+   Select-String -Path "$env:USERPROFILE\.codex\config.toml" -Pattern 'dz23-subagents' -Context 0,8
+   Select-String -Path "C:\caminho\instalacao-antiga\.env" -Pattern '^DZ23_(STATE_DIR|ROTATION|ROUTING_POLICY|ALLOW_PAID|FREE_MODELS)='
+   ```
+
+   Para cada instalação, o valor efetivo de uma variável é, nesta ordem: o ambiente do harness
+   (Environment do `claude mcp get`, `env` na tabela do Codex) > o `.env` da instalação > o padrão. O
+   diretório de estado padrão é `~\.dz23-subagents`; uma instalação pode usar outro (por exemplo
+   `~\.codex\state\dz23-subagents`). Missões de um diretório não aparecem no outro.
+
+1. **Pare tudo.** Feche Claude Code, Codex, Hermes e outros clientes. Encerre só os processos do DZ23
+   Subagents (outros servidores MCP também rodam `src\index.js`):
 
    ```powershell
    Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
-     Where-Object { $_.CommandLine -like '*src\index.js*' } |
+     Where-Object { $_.CommandLine -like '*DZ23-Subagents*' -or $_.CommandLine -like '*dz23-subagents-universal-mcp*' } |
      Select-Object ProcessId, CommandLine
    Stop-Process -Id <PID>
    ```
 
-2. **Backup do estado** e dos `.env` antigos:
+2. **Backup completo**: todos os diretórios de estado encontrados no passo 0, os `.env`, a configuração
+   do Codex e a do Claude Code.
 
    ```powershell
    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-   Copy-Item -Recurse "$env:USERPROFILE\.dz23-subagents" "$env:USERPROFILE\.dz23-subagents-backup-$stamp"
+   $bk = "$env:USERPROFILE\dz23-upgrade-backup-$stamp"
+   New-Item -ItemType Directory $bk | Out-Null
+   Copy-Item -Recurse "$env:USERPROFILE\.dz23-subagents" "$bk\state-default"
+   Copy-Item -Recurse "$env:USERPROFILE\.codex\state\dz23-subagents" "$bk\state-codex"   # só se existir
+   Copy-Item "C:\caminho\instalacao-claude\.env" "$bk\claude.env"
+   Copy-Item "C:\caminho\instalacao-codex\.env" "$bk\codex.env"
+   Copy-Item "$env:USERPROFILE\.codex\config.toml" "$bk\config.toml"
+   Copy-Item "$env:USERPROFILE\.claude.json" "$bk\claude.json"
+   claude mcp get dz23-subagents > "$bk\claude-mcp-get.txt"
    ```
 
-3. **Extraia a 4.0.0 em uma pasta nova** (nunca sobre a antiga) e copie o `.env` antigo para ela:
+   O backup contém chaves e configurações privadas: mantenha-o só neste computador.
+
+3. **Extraia a 4.0.0 em uma pasta nova** (nunca sobre a antiga) e copie um `.env` antigo para ela.
+   O `.env.example` da 4.0.0 lista todos os provedores cadastrados (chave vazia) e todas as variáveis
+   suportadas; use-o para conferir nomes.
 
    ```powershell
-   Copy-Item "C:\caminho\antigo\.env" "C:\caminho\dz23-subagents-4.0.0\.env"
+   Copy-Item "C:\caminho\instalacao-antiga\.env" "C:\caminho\dz23-subagents-4.0.0\.env"
    ```
 
-   Uma única pasta 4.0.0 pode atender os dois harnesses. Se mantiver duas, repita em cada uma e
-   confirme que ambas usam o mesmo `DZ23_STATE_DIR`.
+   Uma única pasta 4.0.0 pode atender os dois harnesses.
 
-4. **Revise o `.env`**:
-   - Alvos `mixed` na rotação (por exemplo modelos cloud do `ollama`, `openrouter/auto`, `mistral`,
-     `together`, `gemini`) ficam bloqueados sem `DZ23_ALLOW_PAID=true`. Declare em
-     `DZ23_FREE_MODELS=ollama:gpt-oss:120b,...` apenas os modelos realmente gratuitos na sua conta; ids
-     terminados em `:free` já são aceitos.
-   - `GITHUB_TOKEN`, `HF_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` só habilitam o provider quando
-     `DZ23_ROTATION` o cita ou com `DZ23_ALLOW_GENERIC_CREDENTIALS=true`. Prefira `GITHUB_MODELS_TOKEN`,
-     `HUGGINGFACE_TOKEN` e `CLOUDFLARE_API_TOKEN`.
-   - `OPENAI_BASE_URL`, `OPENAI_MODEL`, `ANTHROPIC_BASE_URL` e `ANTHROPIC_MODEL` são ignorados: use
-     `DZ23_OPENAI_BASE_URL`, `DZ23_OPENAI_MODEL`, `DZ23_ANTHROPIC_BASE_URL` e `DZ23_ANTHROPIC_MODEL`.
-     Em todos os providers, `DZ23_<PROVIDER>_BASE_URL`/`_MODEL` têm precedência sobre os nomes antigos.
-   - Base URL `http://` só é aceita para loopback ou rede privada; o restante exige `https://`.
+4. **Escolha um diretório de estado e revise variáveis** (no `.env` e no ambiente dos harnesses):
+   - Defina `DZ23_STATE_DIR` explicitamente com o mesmo valor para os dois harnesses. Para trazer
+     missões do outro diretório, copie as pastas `projects\<projeto>` que ainda não existem no destino,
+     com os harnesses fechados; projetos com o mesmo nome não são mesclados.
+   - `DZ23_ROUTING_POLICY=ordered` (2.2.x) vira `rotation-order`. A 4.0.0 ainda aceita `ordered` com
+     aviso, mas outro valor desconhecido impede o servidor de iniciar (código 78).
+   - Variáveis que estavam no Environment do Claude Code (por exemplo `DZ23_ROTATION`) **não** passam
+     para a entrada nova sozinhas: leve-as para o `.env` ou reinclua com `-e` no passo 6. Sem isso, a
+     rotação do `.env` passa a valer.
+   - Alvos `mixed` (modelos cloud do `ollama`, `openrouter/auto`, `mistral`, `together`, `gemini`...)
+     ficam bloqueados sem `DZ23_ALLOW_PAID=true`. Declare em `DZ23_FREE_MODELS=ollama:glm-5.3-flash,...`
+     só modelos realmente gratuitos na sua conta. O sufixo `:free` só conta no OpenRouter. Modelos
+     `:cloud`/`-cloud` servidos por um adapter local (por exemplo `custom:deepseek-v4-flash:cloud` via
+     Ollama) rodam na nuvem e contam como `mixed`.
+   - `low-cost` e `paid` (por exemplo `deepseek:deepseek-chat`) são pulados sem `DZ23_ALLOW_PAID=true`.
+   - Credenciais genéricas só habilitam o provider quando `DZ23_ROTATION` o cita ou com
+     `DZ23_ALLOW_GENERIC_CREDENTIALS=true`: `GITHUB_TOKEN` (use `GITHUB_MODELS_TOKEN`), `HF_TOKEN` (use
+     `HUGGINGFACE_TOKEN`), `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` (use
+     `CLOUDFLARE_WORKERS_AI_TOKEN`).
+   - Provedores de nuvem só aceitam sobrescrever endpoint e modelo com prefixo:
+     `DZ23_<PROVIDER>_BASE_URL`/`_MODEL` (`OPENAI_BASE_URL`, `OLLAMA_BASE_URL`, `GROQ_MODEL`... são
+     ignorados). Os adapters locais mantêm `CUSTOM_BASE_URL`, `LMSTUDIO_BASE_URL`, `VLLM_BASE_URL` e
+     `*_MODEL`.
+   - `http://` só vale para IP de loopback ou privado, `localhost`, `host.docker.internal` ou host listado
+     em `DZ23_PRIVATE_HOSTS` (por exemplo `ollama` num compose); o restante exige `https://`.
    - Com `DZ23_ALLOW_HTTP=true`, configure `DZ23_MCP_TOKEN_FILE` (ou `DZ23_MCP_TOKEN`, 32+ caracteres),
      mesmo em loopback.
 
-5. **Valide sem chamar providers**, na pasta nova:
+5. **Valide sem chamar providers, com o mesmo ambiente que o harness vai usar**, na pasta nova:
 
    ```powershell
+   cd C:\caminho\dz23-subagents-4.0.0
+   $env:DZ23_ROTATION = '<valor que ficará no harness>'   # só se a variável ficar no harness
    node src\index.js config validate
    node src\index.js doctor
+   $env:DZ23_ROTATION = $null
    ```
 
-   `doctor` deve mostrar `PASS  targets` com ao menos um alvo `eligible`. Leia os avisos `cost_policy` e
-   `generic_credentials` antes de continuar.
+   `doctor` deve mostrar `PASS  targets` com ao menos um alvo `eligible` e diz se a rotação veio de
+   `DZ23_ROTATION`. Leia os avisos `cost_policy` e `generic_credentials`; `providers` mostra as colunas
+   `ELIGIBLE` e `NOTE`.
 
 6. **Substitua as entradas dos dois harnesses** (nunca acrescente uma segunda). Gere os arquivos com
    `powershell -ExecutionPolicy Bypass -File scripts\install-windows.ps1` (roda check e testes) ou só
    `node scripts\install-harness.mjs all`:
    - Claude Code: `claude mcp remove -s user dz23-subagents`, depois o comando de
-     `config\generated\claude_code_add_command.txt`; confira com `claude mcp get dz23-subagents`.
+     `config\generated\claude_code_add_command.txt`, acrescentando `-e CHAVE=VALOR` para cada variável
+     que você decidiu manter no harness (por exemplo `claude mcp add -s user -e DZ23_ROTATION=... dz23-subagents -- ...`).
+     Confira com `claude mcp get dz23-subagents`.
    - Codex: em `%USERPROFILE%\.codex\config.toml`, troque a tabela `[mcp_servers.dz23-subagents]` pelo
      conteúdo de `config\generated\codex_config.snippet.toml` (inclui `startup_timeout_sec = 30` e
-     `tool_timeout_sec = 900`).
+     `tool_timeout_sec = 900`). Se a tabela antiga tinha `env`, mantenha a linha com os valores revisados.
 
 7. **Reinicie e faça uma checagem barata.** Abra um harness e chame `list_models` e `mission_status`
    com uma missão existente (nenhum dos dois gera texto). Repita no outro harness e só então delegue.
 
-Para voltar à versão anterior: feche os harnesses, restaure as entradas antigas e o backup do estado.
+Para voltar à versão anterior, com os harnesses fechados:
+
+```powershell
+Copy-Item "$bk\config.toml" "$env:USERPROFILE\.codex\config.toml" -Force
+claude mcp remove -s user dz23-subagents   # depois recrie a entrada antiga com os dados de $bk\claude-mcp-get.txt
+Rename-Item "$env:USERPROFILE\.dz23-subagents" ".dz23-subagents-4.0.0-$stamp"
+Copy-Item -Recurse "$bk\state-default" "$env:USERPROFILE\.dz23-subagents"
+```
+
+Faça o mesmo com os outros diretórios de estado copiados no passo 2 e restaure os `.env` antigos nas
+pastas antigas.
 
 Mudanças que já valiam na 3.0.0 (para quem vem da 2.2.x): a memória é migrada na leitura e gravada
 como schema 2 na próxima escrita; providers locais (`custom`, `lmstudio`, `vllm`) só ficam ativos com
@@ -251,8 +305,8 @@ de `true`/`false` são erro. Esta tabela cobre as variáveis sem outra documenta
 limit e limites de memória estão nas seções acima; estado, HTTP, autenticação e escopos em
 `docs/INSTALL_ANY_HARNESS.md` e `docs/SECURITY_AND_SECRETS.md`; limites de ferramentas e fila em
 `docs/TOOLS.md`; retries (`DZ23_MAX_RETRIES`, `DZ23_RETRY_BASE_DELAY_MS`, `DZ23_RETRY_AFTER_CAP_MS`) em
-`docs/PROVIDER_ARCHITECTURE.md`; `DZ23_MEMORY_FSYNC` em `docs/ARCHITECTURE.md`. Todas aparecem com valor
-de exemplo em `.env.example`.
+`docs/PROVIDER_ARCHITECTURE.md`; `DZ23_MEMORY_FSYNC` em `docs/ARCHITECTURE.md`. `.env.example` lista
+todas as chaves dos provedores cadastrados e todas as variáveis suportadas, sem valores.
 
 `memory repair --json` informa `apply_requested` (se `--apply` foi usado) e `applied` (se algum reparo
 foi de fato feito).
@@ -281,11 +335,12 @@ foi de fato feito).
 | `DZ23_MAX_CHECKPOINTS` | `8` | 1–16 | Checkpoints mantidos por missão |
 | `DZ23_LOCK_TIMEOUT_MS` | `20000` | 1000–120 000 | Espera máxima por um lock de memória |
 | `DZ23_MAX_STDIO_FRAME_BYTES` | `524288` | 65 536–2 097 152 | Mensagem stdio máxima |
-| `DZ23_STDIO_MAX_INFLIGHT` | `8` | 1–64 | Requisições stdio processadas ao mesmo tempo |
+| `DZ23_STDIO_MAX_INFLIGHT` | `8` | 1–64 | Requisições stdio processadas ao mesmo tempo; até 256 esperam na fila, acima disso `-32003 Server busy` |
 | `DZ23_DELEGATE_DEADLINE_MS` | `600000` | 10 000–3 600 000 | Prazo total de `delegate`, `consensus` e `swarm_run` (`deadline_exceeded`) |
-| `DZ23_SHARED_COOLDOWNS` | `true` | — | Persiste cooldowns de provider em `<estado>/providers/status.json`, compartilhados entre processos |
+| `DZ23_SHARED_COOLDOWNS` | `true` | — | Persiste cooldowns transitórios (rate limit, quota, indisponibilidade, timeout) em `<estado>/providers/status.json`, compartilhados entre processos |
 | `DZ23_FREE_MODELS` | vazio | — | Lista `provider:modelo` de alvos `mixed` que o operador declara gratuitos |
-| `DZ23_ALLOW_GENERIC_CREDENTIALS` | `false` | — | Aceita `GITHUB_TOKEN`, `HF_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` sem citar o provider na rotação |
+| `DZ23_PRIVATE_HOSTS` | vazio | — | Hostnames tratados como rede privada (além de IPs privados, `localhost` e `host.docker.internal`) |
+| `DZ23_ALLOW_GENERIC_CREDENTIALS` | `false` | — | Aceita `GITHUB_TOKEN`, `HF_TOKEN`, `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` sem citar o provider na rotação |
 | `DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP` | `false` | — | Permite `--http` em loopback sem token (apenas teste local) |
 
 ## Docker

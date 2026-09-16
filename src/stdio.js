@@ -13,9 +13,10 @@ const idKey = id => (typeof id === 'string' || (typeof id === 'number' && Number
  * A frame larger than maxFrameBytes is reported once and dropped up to its newline without
  * being buffered, so memory stays bounded by maxFrameBytes plus one chunk.
  */
-export function startStdio({processMessage, maxFrameBytes, logger, maxInflight = 8, input = process.stdin, output = process.stdout}) {
+export function startStdio({processMessage, maxFrameBytes, logger, maxInflight = 8, maxQueued = 256, input = process.stdin, output = process.stdout}) {
   const session = {protocolVersion: null};
   const limit = Math.max(1, Math.floor(maxInflight));
+  const queueLimit = Math.max(1, Math.floor(maxQueued));
   const pending = new Set();
   const waiting = [];
   const controllers = new Map();
@@ -45,13 +46,25 @@ export function startStdio({processMessage, maxFrameBytes, logger, maxInflight =
       return;
     }
     const key = !notification && isPlainObject(message) ? idKey(message.id) : null;
+    if (!notification && active >= limit && waiting.length >= queueLimit) {
+      // Bounded backlog: a client flooding requests gets a busy error instead of growing memory without limit.
+      logger?.warn('stdio_request_rejected', {reason: 'queue_full', max_queued: queueLimit});
+      if (key !== null) write({jsonrpc: '2.0', id: message.id, error: {code: RPC_ERRORS.SERVER_BUSY, message: 'Server busy', data: {reason: 'stdio_queue_full'}}});
+      return;
+    }
+    if (key !== null && controllers.has(key)) {
+      // A reused in-flight id would make responses and cancellations ambiguous (and uncancellable).
+      write({jsonrpc: '2.0', id: message.id, error: {code: RPC_ERRORS.INVALID_REQUEST, message: 'Invalid Request', data: {reason: 'duplicate in-flight id'}}});
+      return;
+    }
     const controller = new AbortController();
-    // A duplicate in-flight id keeps the first registration; the newer request simply cannot be cancelled.
-    const registered = key !== null && !controllers.has(key);
+    const registered = key !== null;
     if (registered) controllers.set(key, controller);
     const ctx = {transport: 'stdio', session, requestId: newRequestId(), identity: 'stdio', signal: controller.signal};
     if (!notification) await acquire();
     try {
+      // Cancelled while waiting for a slot: never run it (non-billable tools such as memory_checkpoint ignore signals).
+      if (controller.signal.aborted) return;
       const {response} = await processMessage(message, ctx);
       if (response && !controller.signal.aborted) write(response);
     } finally {
@@ -96,6 +109,9 @@ export function startStdio({processMessage, maxFrameBytes, logger, maxInflight =
       if (line) enqueue(line);
     }
   });
+  // End of input still lets pending requests finish and answer (pipes close stdin right after writing requests).
   const finished = new Promise(resolve => input.on('end', () => idle().then(resolve)));
-  return {session, finished, idle, bufferedBytes: () => bufferBytes, inflight: () => active};
+  /** Shutdown: abort every in-flight and queued request so paid work stops and usage is settled as cancelled. */
+  const abortAll = () => { for (const controller of controllers.values()) controller.abort(); };
+  return {session, finished, idle, abortAll, bufferedBytes: () => bufferBytes, inflight: () => active};
 }

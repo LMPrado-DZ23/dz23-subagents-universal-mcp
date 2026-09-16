@@ -12,18 +12,28 @@ export function tierRank(tier) {
 }
 
 /**
- * Mixed-tier providers bill some models and not others, and their tier is per provider. Without
- * DZ23_ALLOW_PAID only models the operator declared free may run: an OpenRouter-style `:free` model id
- * or an exact `provider:model` entry in DZ23_FREE_MODELS.
+ * Tier of one provider:model. Tiers are per provider, except that a local adapter serving an Ollama-style
+ * `:cloud` / `-cloud` model runs that model remotely on someone's account, so it is mixed, not local.
+ */
+export function effectiveTier(target) {
+  return target.location === 'local' && /[:-]cloud$/i.test(String(target.model || '')) ? 'mixed' : target.tier;
+}
+
+/**
+ * Mixed-tier providers bill some models and not others. Without DZ23_ALLOW_PAID only models the operator declared
+ * free may run: an exact `provider:model` entry in DZ23_FREE_MODELS, or an OpenRouter `:free` model (the suffix only
+ * means "free" on OpenRouter; on other providers or gateways it is an arbitrary alias).
  */
 export function isDeclaredFree(target, cfg) {
-  return String(target.model || '').endsWith(':free') || (cfg.freeModels || []).includes(targetKey(target));
+  if ((cfg.freeModels || []).includes(targetKey(target))) return true;
+  return target.name === 'openrouter' && String(target.model || '').endsWith(':free');
 }
 
 function costReason(target, cfg) {
   if (cfg.allowPaid) return null;
-  if (PAID_TIERS.includes(target.tier)) return 'paid_not_allowed';
-  if (target.tier === 'mixed' && !isDeclaredFree(target, cfg)) return 'mixed_not_allowed';
+  const tier = effectiveTier(target);
+  if (PAID_TIERS.includes(tier)) return 'paid_not_allowed';
+  if (tier === 'mixed' && !isDeclaredFree(target, cfg)) return 'mixed_not_allowed';
   return null;
 }
 
@@ -46,7 +56,8 @@ export function ineligibleReason(target, cfg) {
  * arbitrary model on a mixed-tier provider could otherwise bypass the paid policy.
  */
 export function modelAllowed(target, cfg) {
-  return Boolean(cfg.rotation?.length) || (target.location === 'local' && isPrivateEndpoint(target.baseURL)) || Boolean(cfg.allowPaid) || target.model === target.defaultModel;
+  const privateEndpoint = target.privateEndpoint ?? isPrivateEndpoint(target.baseURL);
+  return Boolean(cfg.rotation?.length) || (target.location === 'local' && privateEndpoint) || Boolean(cfg.allowPaid) || target.model === target.defaultModel;
 }
 
 /**
@@ -64,7 +75,7 @@ export function eligibleTargets(cfg, registry) {
     ? cfg.rotation
     : Object.values(registry).filter(x => x.enabled && x.defaultModel).map(x => `${x.name}:${x.defaultModel}`);
   const eligible = configured.map(entry => withRotationOptIn(parseTarget(entry, registry), cfg)).filter(t => isEligible(t, cfg));
-  if ((cfg.policy || 'free-first') === 'free-first') eligible.sort((a, b) => tierRank(a.tier) - tierRank(b.tier));
+  if ((cfg.policy || 'free-first') === 'free-first') eligible.sort((a, b) => tierRank(effectiveTier(a)) - tierRank(effectiveTier(b)));
   return eligible;
 }
 
@@ -75,6 +86,6 @@ export function targetReport(cfg, registry) {
     : Object.values(registry).filter(x => x.enabled && x.defaultModel).map(x => `${x.name}:${x.defaultModel}`);
   return configured.map(entry => {
     const target = withRotationOptIn(parseTarget(entry, registry), cfg);
-    return {target: targetKey(target), tier: target.tier, eligible: isEligible(target, cfg), reason: ineligibleReason(target, cfg)};
+    return {target: targetKey(target), tier: effectiveTier(target), eligible: isEligible(target, cfg), reason: ineligibleReason(target, cfg)};
   });
 }

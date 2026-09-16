@@ -56,16 +56,23 @@ test('OPENAI_* and ANTHROPIC_* set for other tools never redirect this server', 
   const prefixed = providerRegistry(env({DZ23_OPENAI_BASE_URL: 'https://proxy.example.com/v1', DZ23_ANTHROPIC_MODEL: 'claude-x'}));
   assert.equal(prefixed.openai.baseURL, 'https://proxy.example.com/v1');
   assert.equal(prefixed.anthropic.defaultModel, 'claude-x');
-  // Other providers keep their legacy unprefixed names; the DZ23_ prefix wins when both exist.
-  const legacy = providerRegistry(env({GROQ_BASE_URL: 'https://a.example.com/v1', DZ23_CEREBRAS_BASE_URL: 'https://b.example.com/v1', CEREBRAS_BASE_URL: 'https://c.example.com/v1'}));
-  assert.equal(legacy.groq.baseURL, 'https://a.example.com/v1');
+  // 4.0.0 (audit): cloud providers read BASE_URL/MODEL only with the DZ23_ prefix; OLLAMA_BASE_URL or GROQ_MODEL set
+  // for other tools are ignored. Local adapters keep their specific legacy names.
+  const legacy = providerRegistry(env({GROQ_BASE_URL: 'https://a.example.com/v1', GROQ_MODEL: 'other-tool', DZ23_CEREBRAS_BASE_URL: 'https://b.example.com/v1',
+    OLLAMA_BASE_URL: 'http://localhost:11434/v1', CUSTOM_BASE_URL: 'http://127.0.0.1:9999/v1', CUSTOM_MODEL: 'local-m'}));
+  assert.equal(legacy.groq.baseURL, 'https://api.groq.com/openai/v1');
+  assert.equal(legacy.groq.defaultModel, 'llama-3.3-70b-versatile');
   assert.equal(legacy.cerebras.baseURL, 'https://b.example.com/v1');
+  assert.equal(legacy.ollama.baseURL, 'https://ollama.com/v1');
+  assert.deepEqual([legacy.custom.baseURL, legacy.custom.defaultModel], ['http://127.0.0.1:9999/v1', 'local-m']);
 });
 
 test('cleartext HTTP is refused for public provider endpoints', () => {
-  assert.throws(() => providerRegistry(env({GROQ_BASE_URL: 'http://api.example.com/v1'})), /must use HTTPS/);
+  assert.throws(() => providerRegistry(env({DZ23_GROQ_BASE_URL: 'http://api.example.com/v1'})), /must use HTTPS/);
   assert.equal(providerRegistry(env({CUSTOM_BASE_URL: 'http://127.0.0.1:11434/v1'})).custom.baseURL, 'http://127.0.0.1:11434/v1');
-  assert.equal(providerRegistry(env({CUSTOM_BASE_URL: 'http://ollama:11434/v1'})).custom.tier, 'local');
+  // Single-label names are private only when the operator lists them (LLMNR/mDNS answers can be spoofed on a LAN).
+  assert.throws(() => providerRegistry(env({CUSTOM_BASE_URL: 'http://ollama:11434/v1'})), /DZ23_PRIVATE_HOSTS/);
+  assert.equal(providerRegistry(env({CUSTOM_BASE_URL: 'http://ollama:11434/v1', DZ23_PRIVATE_HOSTS: 'ollama'})).custom.tier, 'local');
 });
 
 test('a local adapter pointed at a public host is mixed tier, not local', () => {

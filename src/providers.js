@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import {ProviderError, classifyHttpFailure, parseRetryAfter} from './provider-errors.js';
-import {isPrivateEndpoint} from './endpoints.js';
+import {isPrivateEndpoint, privateHostList} from './endpoints.js';
 
 export {classifyHttpFailure} from './provider-errors.js';
 
@@ -29,15 +29,16 @@ const defs = {
   ollama: {baseURL: 'https://ollama.com/v1', keyName: 'OLLAMA_API_KEY', defaultModel: '', tier: 'mixed', protocol: 'openai', location: 'cloud', capabilities: C()},
   hyperbolic: {baseURL: 'https://api.hyperbolic.xyz/v1', keyName: 'HYPERBOLIC_API_KEY', defaultModel: '', tier: 'mixed', protocol: 'openai', location: 'cloud', capabilities: C()},
   alibaba: {baseURL: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', keyName: 'ALIBABA_API_KEY', defaultModel: 'qwen-plus', tier: 'mixed', protocol: 'openai', location: 'cloud', capabilities: C()},
-  cloudflare: {baseURL: '', keyName: 'CLOUDFLARE_API_TOKEN', genericAliases: ['CLOUDFLARE_AUTH_TOKEN'], defaultModel: '@cf/openai/gpt-oss-120b', tier: 'free-tier', protocol: 'openai', location: 'cloud', capabilities: C()},
+  cloudflare: {baseURL: '', keyName: 'CLOUDFLARE_WORKERS_AI_TOKEN', genericAliases: ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_AUTH_TOKEN'], defaultModel: '@cf/openai/gpt-oss-120b', tier: 'free-tier', protocol: 'openai', location: 'cloud', capabilities: C()},
   custom: {baseURL: 'http://127.0.0.1:11434/v1', keyName: 'CUSTOM_API_KEY', defaultModel: 'qwen3-coder', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()},
   lmstudio: {baseURL: 'http://127.0.0.1:1234/v1', keyName: 'LMSTUDIO_API_KEY', defaultModel: 'local-model', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()},
   vllm: {baseURL: 'http://127.0.0.1:8000/v1', keyName: 'VLLM_API_KEY', defaultModel: 'local-model', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()}
 };
 
-// Unprefixed OPENAI_*/ANTHROPIC_* variables are commonly set for other tools (SDKs, Claude Code, gateways);
-// silently redirecting this server's keys or models through them would be unsafe. Use DZ23_OPENAI_* / DZ23_ANTHROPIC_*.
-const PREFIX_ONLY = new Set(['openai', 'anthropic']);
+// Unprefixed <PROVIDER>_BASE_URL / _MODEL variables (OPENAI_BASE_URL, OLLAMA_BASE_URL, GROQ_MODEL...) are commonly set
+// for other tools; silently redirecting this server's cloud keys or models through them would be unsafe. Cloud providers
+// read only DZ23_<PROVIDER>_*; the local adapters keep their own specific legacy names (CUSTOM_BASE_URL, ...).
+const LEGACY_UNPREFIXED = new Set(['custom', 'lmstudio', 'vllm']);
 
 function envAny(names = [], env = process.env) {
   for (const name of names) {
@@ -50,10 +51,10 @@ function envAny(names = [], env = process.env) {
   return {value: '', source: 'none'};
 }
 
-/** DZ23_<PROVIDER>_<SUFFIX> first, then the legacy unprefixed name (never for PREFIX_ONLY providers). */
+/** DZ23_<PROVIDER>_<SUFFIX> first, then the legacy unprefixed name for the local adapters only. */
 function providerEnv(name, suffix, env) {
   const prefix = name.toUpperCase();
-  return env[`DZ23_${prefix}_${suffix}`] || (PREFIX_ONLY.has(name) ? '' : env[`${prefix}_${suffix}`]) || '';
+  return env[`DZ23_${prefix}_${suffix}`] || (LEGACY_UNPREFIXED.has(name) ? env[`${prefix}_${suffix}`] : '') || '';
 }
 
 /**
@@ -75,7 +76,7 @@ function resolvedBase(name, d, env) {
   return d.baseURL;
 }
 
-function validateBaseURL(raw, name) {
+function validateBaseURL(raw, name, privateHosts) {
   if (!raw) return raw;
   let url;
   try { url = new URL(raw); } catch { throw new Error(`Invalid base URL for ${name}`); }
@@ -83,11 +84,14 @@ function validateBaseURL(raw, name) {
     throw new Error(`Base URL for ${name} must be HTTP(S) without credentials, query or fragment`);
   }
   // Cleartext HTTP would send provider keys and prompts readable on the network.
-  if (url.protocol === 'http:' && !isPrivateEndpoint(raw)) throw new Error(`Base URL for ${name} must use HTTPS unless it points to a loopback or private-network host`);
+  if (url.protocol === 'http:' && !isPrivateEndpoint(raw, privateHosts)) {
+    throw new Error(`Base URL for ${name} must use HTTPS unless it is a loopback/private IP, localhost or a host listed in DZ23_PRIVATE_HOSTS`);
+  }
   return raw;
 }
 
 export function providerRegistry(env = process.env) {
+  const privateHosts = privateHostList(env.DZ23_PRIVATE_HOSTS);
   return Object.fromEntries(Object.entries(defs).map(([name, d]) => {
     const specific = envAny([d.keyName, ...(d.aliases || [])], env);
     const generic = !specific.value && d.genericAliases ? envAny(d.genericAliases, env) : {value: '', source: 'none'};
@@ -96,11 +100,12 @@ export function providerRegistry(env = process.env) {
     const local = d.location === 'local';
     // A local server is configured only when the operator sets its key, endpoint or model (or names it in DZ23_ROTATION).
     const explicitLocal = local && Boolean(secret.value || providerEnv(name, 'BASE_URL', env) || providerEnv(name, 'MODEL', env));
-    const baseURL = validateBaseURL(resolvedBase(name, d, env), name);
+    const baseURL = validateBaseURL(resolvedBase(name, d, env), name, privateHosts);
+    const privateEndpoint = Boolean(baseURL) && isPrivateEndpoint(baseURL, privateHosts);
     // A local adapter pointed at a public host is not local: its cost is unknown, so it is treated as mixed.
-    const tier = local && baseURL && !isPrivateEndpoint(baseURL) ? 'mixed' : d.tier;
+    const tier = local && baseURL && !privateEndpoint ? 'mixed' : d.tier;
     return [name, {
-      name, baseURL, apiKey: local ? (secret.value || 'local') : secret.value,
+      name, baseURL, privateEndpoint, apiKey: local ? (secret.value || 'local') : secret.value,
       keyName: d.keyName, credentialSource: secret.source, ...(generic.value && !useGeneric ? {ignoredCredentialSource: generic.source} : {}),
       defaultModel: providerEnv(name, 'MODEL', env) || d.defaultModel,
       tier, protocol: d.protocol, location: d.location, capabilities: {...d.capabilities},
@@ -142,6 +147,7 @@ async function boundedText(response, target, maxBytes) {
 /** Fetch JSON with timeout, size bound and classified failures. Raw bodies never leave this function. */
 async function requestJson(target, url, {method = 'POST', headers = {}, body, timeoutMs = 90_000, signal, maxResponseBytes = 2 * 1024 * 1024}) {
   const meta = {provider: target.name, model: target.model};
+  if (signal?.aborted) throw new ProviderError({...meta, kind: 'provider_error', detail: 'request cancelled'});
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);

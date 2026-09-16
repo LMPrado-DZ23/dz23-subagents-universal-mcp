@@ -48,30 +48,35 @@ test('doctor reports every configured target with tier and eligibility, and warn
   assert.equal(blocked.stdout.includes(FAKE), false);
   const targets = check(blocked, 'targets');
   assert.equal(targets.status, 'pass');
-  assert.equal(targets.detail, 'custom:test-model local eligible; ollama:gpt-oss:120b mixed skipped(mixed_not_allowed); openai:gpt-4o paid skipped(paid_not_allowed)');
+  assert.equal(targets.detail, 'DZ23_ROTATION set (explicit rotation): custom:test-model local eligible; ollama:gpt-oss:120b mixed skipped(mixed_not_allowed); openai:gpt-4o paid skipped(paid_not_allowed)');
   const cost = check(blocked, 'cost_policy');
   assert.equal(cost.status, 'warn');
-  assert.match(cost.detail, /^skipped by cost policy: ollama:gpt-oss:120b \(mixed_not_allowed\), openai:gpt-4o \(paid_not_allowed\); /);
+  assert.match(cost.detail, /^DZ23_ROTATION set \(explicit rotation\); skipped by cost policy: ollama:gpt-oss:120b \(mixed_not_allowed\), openai:gpt-4o \(paid_not_allowed\); /);
   assert.match(cost.detail, /DZ23_FREE_MODELS only if it is really free/);
   assert.match(cost.detail, /DZ23_ALLOW_PAID=true/);
 
   const declared = await cli(f, ['doctor', '--json'], {...env, DZ23_ROTATION: 'custom:test-model,ollama:gpt-oss:120b', DZ23_FREE_MODELS: 'ollama:gpt-oss:120b'});
-  assert.equal(check(declared, 'targets').detail, 'custom:test-model local eligible; ollama:gpt-oss:120b mixed eligible');
+  assert.equal(check(declared, 'targets').detail, 'DZ23_ROTATION set (explicit rotation): custom:test-model local eligible; ollama:gpt-oss:120b mixed eligible');
   assert.equal(check(declared, 'cost_policy').status, 'pass');
 
   const paid = await cli(f, ['doctor', '--json'], {...env, DZ23_ALLOW_PAID: 'true'});
-  assert.deepEqual([check(paid, 'cost_policy').status, check(paid, 'cost_policy').detail], ['pass', 'DZ23_ALLOW_PAID=true; paid, low-cost and mixed targets may be billed']);
+  assert.deepEqual([check(paid, 'cost_policy').status, check(paid, 'cost_policy').detail],
+    ['pass', 'DZ23_ROTATION set (explicit rotation); DZ23_ALLOW_PAID=true; paid, low-cost and mixed targets may be billed']);
 
   const human = await cli(f, ['doctor'], env);
-  assert.match(human.stdout, /^WARN  cost_policy: skipped by cost policy/m);
-  assert.match(human.stdout, /^PASS  targets: custom:test-model local eligible;/m);
+  assert.match(human.stdout, /^WARN  cost_policy: DZ23_ROTATION set \(explicit rotation\); skipped by cost policy/m);
+  assert.match(human.stdout, /^PASS  targets: DZ23_ROTATION set \(explicit rotation\): custom:test-model local eligible;/m);
+
+  const defaulted = await cli(f, ['doctor', '--json'], {DZ23_ROTATION: ''});
+  assert.equal(check(defaulted, 'targets').detail, 'DZ23_ROTATION unset (default model of each enabled provider): custom:qwen3-coder local eligible');
+  assert.equal(check(defaulted, 'cost_policy').detail, 'DZ23_ROTATION unset (default model of each enabled provider); DZ23_ALLOW_PAID=false; no configured target skipped by cost policy');
 });
 
 test('doctor fails the targets check when every configured target is skipped', async t => {
   const f = await fixture(t);
   const result = await cli(f, ['doctor', '--json'], {DZ23_ROTATION: 'openrouter:openrouter/auto', CUSTOM_BASE_URL: '', OPENROUTER_API_KEY: FAKE});
   assert.equal(result.status, 1);
-  assert.deepEqual([check(result, 'targets').status, check(result, 'targets').detail], ['fail', 'openrouter:openrouter/auto mixed skipped(mixed_not_allowed)']);
+  assert.deepEqual([check(result, 'targets').status, check(result, 'targets').detail], ['fail', 'DZ23_ROTATION set (explicit rotation): openrouter:openrouter/auto mixed skipped(mixed_not_allowed)']);
   assert.equal(check(result, 'cost_policy').status, 'warn');
   assert.equal(result.stdout.includes(FAKE), false);
 });
@@ -86,7 +91,7 @@ test('doctor warns about ignored generic credentials by variable name only', asy
   assert.match(generic.detail, /GITHUB_MODELS_TOKEN/);
   assert.equal(ignored.stdout.includes(FAKE), false);
   const named = await cli(f, ['doctor', '--json'], {GITHUB_TOKEN: FAKE, DZ23_ROTATION: 'custom:test-model,github:gpt-4o-mini'});
-  assert.deepEqual([check(named, 'generic_credentials').status, check(named, 'targets').detail], ['pass', 'custom:test-model local eligible; github:gpt-4o-mini free-tier eligible']);
+  assert.deepEqual([check(named, 'generic_credentials').status, check(named, 'targets').detail], ['pass', 'DZ23_ROTATION set (explicit rotation): custom:test-model local eligible; github:gpt-4o-mini free-tier eligible']);
   const allowed = await cli(f, ['doctor', '--json'], {GITHUB_TOKEN: FAKE, DZ23_ALLOW_GENERIC_CREDENTIALS: 'true'});
   assert.equal(check(allowed, 'generic_credentials').status, 'pass');
 });
@@ -122,6 +127,13 @@ test('config validate summary includes the 4.0.0 routing and runtime settings', 
   const defaults = (await cli(f, ['config', 'validate', '--json'])).json().summary;
   assert.deepEqual([defaults.free_models, defaults.allow_generic_credentials, defaults.shared_cooldowns, defaults.delegate_deadline_ms, defaults.stdio_max_inflight],
     [[], false, true, 600000, 8]);
+  const text = await cli(f, ['config', 'validate']);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /^Configuration valid\.\nSummary:\n/);
+  assert.match(text.stdout, /^ {2}rotation: custom:test-model$/m);
+  assert.match(text.stdout, /^ {2}free_models: -$/m);
+  assert.match(text.stdout, /^ {2}delegate_deadline_ms: 600000$/m);
+  assert.match(text.stdout, /^ {2}shared_cooldowns: true$/m);
   const custom = await cli(f, ['config', 'validate', '--json'], {DZ23_FREE_MODELS: 'ollama:gpt-oss:120b, openrouter:some/model:free', DZ23_ALLOW_GENERIC_CREDENTIALS: 'true',
     DZ23_SHARED_COOLDOWNS: 'false', DZ23_DELEGATE_DEADLINE_MS: '120000', DZ23_STDIO_MAX_INFLIGHT: '4'});
   assert.equal(custom.status, 0, custom.stderr);
@@ -130,13 +142,17 @@ test('config validate summary includes the 4.0.0 routing and runtime settings', 
     [['ollama:gpt-oss:120b', 'openrouter:some/model:free'], true, false, 120000, 4]);
 });
 
-test('providers text table shows the tier of each provider', async t => {
+test('providers text table shows tier, cost-policy eligibility and notes without secret values', async t => {
   const f = await fixture(t);
-  const out = await cli(f, ['providers']);
+  const out = await cli(f, ['providers'], {OPENROUTER_API_KEY: FAKE, GITHUB_TOKEN: FAKE});
   assert.equal(out.status, 0, out.stderr);
-  assert.match(out.stdout, /^PROVIDER\s+STATUS\s+TIER\s+ENABLED/m);
-  assert.match(out.stdout, /^custom\s+CONFIGURED\s+local\s+yes/m);
-  assert.match(out.stdout, /^openrouter\s+MISSING_API_KEY\s+mixed\s+no/m);
+  assert.match(out.stdout, /^PROVIDER\s+STATUS\s+TIER\s+ELIGIBLE\s+ENABLED\s+CREDENTIAL\s+CATALOG\s+INFERENCE\s+DEFAULT_MODEL\s+NOTE$/m);
+  assert.match(out.stdout, /^custom\s+CONFIGURED\s+local\s+yes\s+yes\s.*qwen3-coder\s+-$/m);
+  assert.match(out.stdout, /^openrouter\s+CONFIGURED\s+mixed\s+no\s+yes\s+present\s.*openrouter\/auto\s+blocked:mixed_not_allowed$/m);
+  assert.match(out.stdout, /^github\s+MISSING_API_KEY\s+free-tier\s+no\s+no\s.*gpt-4o-mini\s+ignored env:GITHUB_TOKEN$/m);
+  assert.equal(out.stdout.includes(FAKE), false);
+  const json = (await cli(f, ['providers', '--json'], {OPENROUTER_API_KEY: FAKE})).json();
+  assert.equal(Object.hasOwn(json[0], 'eligible'), false, 'JSON output stays the inventory');
 });
 
 test('installer writes the Claude Code add command and Codex timeouts without touching harness config', async t => {

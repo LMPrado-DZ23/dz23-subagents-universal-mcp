@@ -172,7 +172,7 @@ export function startHttp(cfg, router, memory, mcpHandler, deps = {}) {
         if (url.searchParams.get('refresh') === 'true') {
           return fail(res, 405, 'method_not_allowed', 'Refreshing catalogs calls providers: use POST /api/discover with {"refresh": true}', ctx, undefined, {allow: 'POST'});
         }
-        const args = {refresh: false};
+        const args = {cache_only: true};
         if (url.searchParams.has('provider')) args.provider = url.searchParams.get('provider');
         return restTool(res, 'discover_models', args, ctx);
       }

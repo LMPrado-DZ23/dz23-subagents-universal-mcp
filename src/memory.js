@@ -14,7 +14,7 @@ import {nullLogger} from './logger.js';
 // No trailing dot: Windows strips it, so `proj.` and `proj` would share one directory.
 const ID = /^[a-zA-Z0-9](?:[a-zA-Z0-9._-]{0,118}[a-zA-Z0-9_-])?$/;
 // Windows device names cannot be directories (with or without an extension) on any drive.
-const RESERVED_ID = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
+const RESERVED_ID = /^(?:con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\..*)?$/i;
 const CHECKPOINT_LISTS = ['acceptance_criteria', 'decisions', 'invariants', 'completed_tasks', 'active_tasks', 'blocked_tasks', 'next_tasks', 'known_failures', 'files_read', 'files_changed', 'artifacts'];
 const CHECKPOINT_SCALARS = ['next_action', 'status', 'summary', 'goal'];
 
