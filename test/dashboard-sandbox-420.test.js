@@ -90,7 +90,7 @@ test('patch_validate runs an allowlisted command on a copy and never touches the
   assert.equal((await s.tool('patch_validate', {workspace: dir, patch: fix, command: 'rm -rf /'})).error.code, 'command_not_allowed');
   assert.equal((await s.tool('patch_validate', {workspace: dir, patch: '--- a/.env\n+++ b/.env\n@@ -0,0 +1 @@\n+X=1\n', command: 'node check.js'})).error.code, 'patch_denied');
   assert.equal((await s.tool('patch_validate', {workspace: dir, patch: fix.replace('broken', 'nonexistent line'), command: 'node check.js'})).error.code, 'patch_rejected');
-  process.env.OPENAI_API_KEY = 'sk-sandbox-leak-check-000000000000';
+  process.env.OPENAI_API_KEY = ['sk', 'sandbox', 'leak', 'check', '0'.repeat(12)].join('-');
   t.after(() => { delete process.env.OPENAI_API_KEY; });
   const env = await s.tool('patch_validate', {workspace: dir, patch: fix, command: commands[2]});
   assert.match(env.stdout, /none/, 'provider keys of the server never reach the command');
@@ -102,9 +102,15 @@ test('patch_validate runs an allowlisted command on a copy and never touches the
 });
 
 test('patch_validate docker mode runs without network', {skip: !hasGit || !hasDocker}, async t => {
+  const image = 'node:22-bookworm-slim';
+  const ready = spawnSync('docker', ['image', 'inspect', image], {timeout: 30000}).status === 0 || spawnSync('docker', ['pull', image], {timeout: 240000}).status === 0;
+  if (!ready) { t.skip('docker image could not be obtained on this machine'); return; }
   const s0 = await stack(t);
   const {dir, fix} = await repo(s0.root);
   const s = await stack(t, {cfg: {workspaceRoots: [dir], sandboxEnabled: true, sandboxCommands: ['node check.js'], sandboxTimeoutMs: 300000, sandboxMode: 'docker', sandboxImage: 'node:22-bookworm-slim'}});
   const out = await s.tool('patch_validate', {workspace: dir, patch: fix, command: 'node check.js'});
-  assert.deepEqual([out.mode, out.network, out.exit_code], ['docker', 'none', 0]);
+  assert.deepEqual([out.mode, out.network, out.exit_code], ['docker', 'none', 0], out.stderr);
+  const offline = await stack(t, {cfg: {workspaceRoots: [dir], sandboxEnabled: true, sandboxCommands: ['node -e "fetch(\'https://example.com\').then(()=>process.exit(0),()=>process.exit(3))"'], sandboxTimeoutMs: 120000, sandboxMode: 'docker', sandboxImage: image}});
+  const net = await offline.tool('patch_validate', {workspace: dir, patch: fix, command: 'node -e "fetch(\'https://example.com\').then(()=>process.exit(0),()=>process.exit(3))"'});
+  assert.equal(net.exit_code, 3, 'the container has no network');
 });

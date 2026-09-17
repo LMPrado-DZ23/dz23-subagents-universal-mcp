@@ -4,7 +4,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v4.1.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
+**v4.2.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
 
 [English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
@@ -47,8 +47,10 @@ Claude / Codex / Hermes / cliente MCP
 
 | Área | Implementado nesta versão |
 | --- | --- |
-| MCP | 11 ferramentas da 4.0.0 + 11 novas; resources e prompts; revisões 2025-11-25 e 2025-06-18; schemas executados; erros JSON-RPC padronizados |
-| Projeto e missões | Leitura segura de pastas permitidas e Git somente leitura; contexto anexado com máscara de segredos; missões assíncronas; travas entre harnesses; log de auditoria |
+| MCP | 11 ferramentas da 4.0.0 + 16 novas; resources e prompts; revisões 2025-11-25 e 2025-06-18; schemas executados; erros JSON-RPC padronizados |
+| Projeto e missões | Leitura segura de pastas permitidas e Git somente leitura; contexto anexado com máscara de segredos; missões assíncronas e em grafo; travas entre harnesses; log de auditoria |
+| Roteamento | A MCP escolhe o modelo: faixa de custo primeiro e, dentro dela, o de melhor histórico para o tipo de tarefa; `routing_explain` e `cost_estimate` |
+| Operação 4.2.0 | Painel local somente leitura (`dashboard`); validação de patch em cópia isolada (`patch_validate`, desligada por padrão) |
 | Transporte | stdio; HTTP JSON opcional (desligado por padrão), sem SSE/sessões/OAuth |
 | Segurança HTTP | Token por variável ou arquivo, escopos por token, Host/Origin, rate limit e limites por processo |
 | Delegação | OpenAI-compatible e Anthropic Messages; retry limitado; failover; cooldown por tipo de erro |

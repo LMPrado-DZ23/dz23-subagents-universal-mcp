@@ -329,3 +329,96 @@ a cadeia inteira.
 | `mission_jobs_busy` / `job_not_found` / `job_not_paused` | Limite de jobs / job desconhecido / retomada de job não pausado | 400 |
 
 As ferramentas novas existem só em MCP (stdio e `/mcp`); a API REST continua com as rotas da 4.0.0.
+
+## Ferramentas adicionadas na 4.2.0
+
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
+| --- | --- | --- | --- | --- |
+| `mission_list` | `project_id`, `limit`, `cursor` | Missões com status, objetivo, próximo passo, progresso de loop/grafo e URI do resource | `memory:read` | local |
+| `playbook_get` | `name`, `arguments` | Sem `name`: lista os playbooks. Com `name`: instruções prontas (os mesmos prompts MCP) | `memory:read` | local |
+| `routing_explain` | `task_type`, `role`, `target` | Ordem de modelos que o servidor usaria agora e o motivo de cada exclusão | `provider:discover` | sem rede |
+| `cost_estimate` | `tool`, `prompt`/`prompt_chars`, `models`, `roles`, `max_agents`, `synthesis` | Limite superior de chamadas, tokens e custo antes de rodar | `provider:discover` | sem rede |
+| `patch_validate` | `workspace`, `patch`, `command`, `timeout_ms` | Aplica um diff numa cópia e roda um comando de teste permitido (desligado por padrão) | `sandbox:execute` | local |
+
+`mission_list` e `playbook_get` existem porque nem todo harness expõe resources e prompts MCP ao modelo: o
+Codex CLI 0.154 respondeu `RESOURCE_TOOLS_UNAVAILABLE` num teste real. Com eles, qualquer cliente que chama
+ferramentas tem os mesmos dados e instruções.
+
+### Quem escolhe o modelo
+
+O harness decide **o que** fazer; o servidor decide **com qual modelo**. Com `target: auto` (padrão), o
+roteador:
+
+1. aplica a política de custo (`paid`/`low-cost`/`mixed` bloqueados sem `DZ23_ALLOW_PAID`, exceto
+   `DZ23_FREE_MODELS`) e remove alvos em cooldown;
+2. ordena por faixa de custo (`local` → `free-tier` → `mixed` → `low-cost` → `paid`);
+3. **dentro de cada faixa**, com `DZ23_ROUTING_POLICY=free-first` e `DZ23_ADAPTIVE_ROUTING=true` (padrão),
+   coloca primeiro o modelo com melhor histórico para o tipo de tarefa: taxa de sucesso suavizada dividida
+   por um fator de latência, depois de pelo menos 3 observações; alvos cuja cota informada pelo provedor
+   (`x-ratelimit-remaining-*`, `anthropic-ratelimit-*`) chegou a zero vão para o fim até o reset.
+
+`task_type` (`general`, `code`, `review`, `design`, `security`, `testing`, `ops`, `summary`) vem do papel
+(`backend`/`frontend` = `code`, `reviewer` = `review`, `qa` = `testing`, `security` = `security`,
+`devops` = `ops`, `architect` = `design`) ou do parâmetro `task_type` de `delegate`. O aprendizado nunca
+move um modelo para outra faixa de custo e nunca libera modelo pago; com `DZ23_ROUTING_POLICY=rotation-order`
+a ordem da rotação é mantida. As observações ficam em `<estado>/providers/routing-stats.json` (compartilhadas
+de forma aproximada entre processos: vence o registro com mais chamadas). `routing_explain` mostra tudo isso
+sem chamar provedores.
+
+### Missões em grafo
+
+`mission_start` com `plan: {nodes: [...]}` (até 30 nós) executa um grafo:
+
+- cada nó tem `id`, `prompt`, `title`, `role`, `task_type`, `depends_on` e `max_attempts` (1–3, padrão 2);
+- ids únicos, dependências existentes e ausência de ciclos são validados antes de começar (`invalid_plan`);
+- nós cujas dependências terminaram rodam em paralelo (`DZ23_MISSION_PARALLEL_NODES`, padrão 3) com
+  `delegate`, recebendo o objetivo e os resultados das dependências entre marcadores com nonce;
+- falha repete até `max_attempts`; nós que dependem de um nó falho ficam `skipped` e o job termina `failed`
+  com `failed_nodes`;
+- `dag_state` da missão é gravado a cada transição (status, tentativas, provider/modelo, erro e até 4 000
+  caracteres de resultado por nó);
+- `mission_start` com o mesmo plano e `resume_plan: true` reaproveita os nós `done` — também depois de um
+  reinício — e só executa o que faltou;
+- pausa, cancelamento, prazo e a regra de conclusão (testes aprovados registrados pelo harness durante o job)
+  são os mesmos do loop.
+
+`mission_status_job` e `mission_list` mostram o progresso (`dag: {nodes, done, running, pending, failed, skipped}`).
+
+### Validação de patch em sandbox
+
+`patch_validate` só aparece com `DZ23_SANDBOX_ENABLED=true`, `DZ23_WORKSPACE_ROOTS` e
+`DZ23_SANDBOX_COMMANDS` (comandos separados por `;;`, por exemplo `npm test;;npm run lint`):
+
+1. recusa comando que não seja exatamente um dos permitidos (`command_not_allowed`) e diff que toque
+   `.git`, arquivos protegidos, caminhos absolutos ou `..` (`patch_denied`);
+2. aplica as mesmas checagens de `git_readonly` (repositório dentro da raiz, configuração sem programas);
+3. clona o repositório (`git clone --shared`) numa pasta temporária no commit `HEAD`, verifica e aplica o
+   diff (`patch_rejected` se não aplicar);
+4. roda o comando com ambiente mínimo (sem as chaves de provedor do servidor), `HOME`/`TEMP` na pasta
+   temporária e limite `DZ23_SANDBOX_TIMEOUT_MS` (a árvore de processos é encerrada no timeout);
+5. devolve `exit_code`, `passed`, `timed_out`, duração e o final de stdout/stderr (segredos mascarados) e
+   apaga a pasta temporária.
+
+O repositório original nunca é alterado e nada é commitado ou enviado. Uma validação por vez
+(`sandbox_busy`). **No modo `process` a rede não é isolada** e o comando roda com o usuário do servidor:
+permita só comandos de teste do próprio projeto. `DZ23_SANDBOX_MODE=docker` roda em
+`docker run --network none` com limites de CPU, memória e processos (`DZ23_SANDBOX_IMAGE`, padrão
+`node:22-bookworm-slim`); dependências precisam estar no repositório ou na imagem.
+
+### Painel
+
+`node src/index.js dashboard [--port 8788]` abre um painel **somente leitura** em `127.0.0.1`: missões e
+progresso de loop/grafo, travas ativas (sem tokens), uso do dia, cooldowns, roteamento aprendido e as últimas
+chamadas do log de auditoria. A URL impressa contém um token aleatório no fragmento (`#token=`), válido
+enquanto o comando rodar; sem ele a API responde 401. Só aceita `GET`, só `Host` de loopback, com CSP estrita
+e dados exibidos como texto.
+
+### Erros novos na 4.2.0
+
+| Código | Quando | REST |
+| --- | --- | --- |
+| `invalid_plan` | Plano com id repetido, dependência inexistente, ciclo ou campo inválido | 400 |
+| `sandbox_disabled` / `command_not_allowed` / `patch_denied` | Sandbox desligado / comando fora da lista / diff em caminho protegido | 403 |
+| `patch_rejected` | O diff não aplica em `HEAD` | 422 |
+| `sandbox_busy` | Outra validação em andamento | 429 |
+| `git_no_commits` / `sandbox_setup_failed` | Repositório sem commit / falha ao copiar | 400 / 500 |

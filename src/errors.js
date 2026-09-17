@@ -75,6 +75,7 @@ const TOOL_ERROR_HTTP_STATUS = {
   patch_rejected: 422,
   sandbox_busy: 429,
   invalid_plan: 400,
+  git_no_commits: 400,
   idempotency_conflict: 409,
   no_local_target: 503,
   response_invalid: 502,

@@ -41,6 +41,13 @@ function minimalEnv(home) {
   return env;
 }
 
+/** Environment of the docker CLI on the host: its own configuration, never the server's provider keys (not forwarded into the container). */
+function dockerCliEnv(home) {
+  const env = minimalEnv(home);
+  for (const name of ['HOME', 'USERPROFILE', 'DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'DOCKER_CERT_PATH', 'DOCKER_TLS_VERIFY']) if (process.env[name]) env[name] = process.env[name];
+  return env;
+}
+
 function killTree(child) {
   if (process.platform === 'win32') spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {windowsHide: true, stdio: 'ignore'});
   else try { process.kill(-child.pid, 'SIGKILL'); } catch { child.kill('SIGKILL'); }
@@ -53,7 +60,7 @@ function run(cfg, {command, work, home, timeoutMs}) {
   const name = `dz23-sandbox-${crypto.randomUUID()}`;
   const child = docker
     ? spawn('docker', ['run', '--rm', '--name', name, '--network', 'none', '--cpus', '2', '--memory', '2g', '--pids-limit', '512', '-v', `${work}:/work`, '-w', '/work', cfg.sandboxImage, 'sh', '-c', command],
-      {env: minimalEnv(home), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true})
+      {env: dockerCliEnv(home), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true})
     : spawn(command, {cwd: work, shell: true, env: minimalEnv(home), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32'});
   const max = cfg.sandboxMaxOutputChars || 65_536;
   let stdout = '';

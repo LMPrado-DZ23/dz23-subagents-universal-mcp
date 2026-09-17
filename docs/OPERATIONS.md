@@ -352,6 +352,14 @@ foi de fato feito).
 | `DZ23_RESPONSE_CACHE_TTL_MS` | `0` | 0–86 400 000 | Validade do cache de `delegate` com `cache: true`; 0 desliga |
 | `DZ23_MAX_MISSION_JOBS` | `2` | 1–16 | Jobs de `mission_start` rodando ao mesmo tempo |
 | `DZ23_MISSION_DEADLINE_MS` | `3600000` | 10 000–86 400 000 | Prazo total de um job de missão (`deadline_exceeded`) |
+| `DZ23_MISSION_PARALLEL_NODES` | `3` | 1–8 | Nós de um plano (`mission_start` com `plan`) executados ao mesmo tempo |
+| `DZ23_ADAPTIVE_ROUTING` | `true` | — | Reordena modelos dentro da mesma faixa de custo pelo histórico de sucesso, latência e cota (só com `free-first`) |
+| `DZ23_SANDBOX_ENABLED` | `false` | — | Liga `patch_validate` (exige também `DZ23_WORKSPACE_ROOTS` e `DZ23_SANDBOX_COMMANDS`) |
+| `DZ23_SANDBOX_COMMANDS` | vazio | até 20 | Comandos permitidos, separados por `;;` (ex.: `npm test;;npm run lint`); o cliente só escolhe um deles |
+| `DZ23_SANDBOX_MODE` | `process` | `process`, `docker` | `docker` roda com `--network none`; `process` não isola a rede |
+| `DZ23_SANDBOX_IMAGE` | `node:22-bookworm-slim` | — | Imagem do modo `docker` |
+| `DZ23_SANDBOX_TIMEOUT_MS` | `300000` | 5 000–1 800 000 | Tempo máximo do comando de validação |
+| `DZ23_SANDBOX_MAX_OUTPUT_CHARS` | `65536` | 1 024–1 048 576 | Final de stdout/stderr devolvido |
 
 ## Missões assíncronas, travas e auditoria (4.1.0)
 
@@ -364,6 +372,18 @@ foi de fato feito).
   nem chaves. Inclua `audit/` no backup do diretório de estado.
 - Com `DZ23_WORKSPACE_ROOTS`, aponte só para pastas de projeto, nunca para a pasta de usuário inteira: arquivos
   de credencial conhecidos são bloqueados, mas dados sensíveis sem padrão reconhecível seriam legíveis.
+
+## Painel, roteamento aprendido e sandbox (4.2.0)
+
+- **Painel:** `node src/index.js dashboard` (ou `--port 0` para porta livre) imprime uma URL
+  `http://127.0.0.1:<porta>/#token=...`. Abra no navegador do mesmo computador; o token vale até encerrar o
+  comando (Ctrl+C). É somente leitura e não precisa de `DZ23_ALLOW_HTTP`.
+- **Roteamento aprendido:** `<estado>/providers/routing-stats.json` pode ser apagado com os harnesses fechados
+  para recomeçar o aprendizado; `DZ23_ADAPTIVE_ROUTING=false` volta à ordem fixa da 4.1.0.
+- **Sandbox:** ligue só para repositórios seus e com comandos de teste conhecidos. No modo `process` o comando
+  roda com seu usuário e acesso à rede; use `DZ23_SANDBOX_MODE=docker` quando o Docker estiver disponível.
+  Projetos que precisam de `npm install` antes dos testes precisam das dependências na imagem Docker ou de um
+  comando permitido que as instale.
 
 ## Docker
 

@@ -1,5 +1,50 @@
 # Changelog
 
+## 4.2.0 — 2026-09-17 — roteamento adaptativo, missões em grafo, painel, sandbox de patch e validação com clientes reais
+
+Versão menor: as ferramentas da 4.1.0 mantêm contrato. Nenhuma capacidade nova com efeito fora da memória
+fica ligada por padrão.
+
+### Novo
+
+- **Roteamento adaptativo:** o servidor aprende, por modelo e tipo de tarefa, a taxa de sucesso e a latência,
+  e lê a cota restante nos cabeçalhos dos provedores. Reordena só dentro da mesma faixa de custo, só com
+  `free-first` (`DZ23_ADAPTIVE_ROUTING`, padrão ligado) e nunca libera modelo pago.
+  - Observações ficam em `providers/routing-stats.json`.
+  - `delegate` aceita `task_type`.
+  - `routing_explain` mostra a ordem e o motivo de cada exclusão; `cost_estimate` mostra o limite de
+    chamadas, tokens e custo antes de rodar.
+- **Missões em grafo:** `mission_start` com `plan.nodes`.
+  - Validação de ids, dependências e ciclos.
+  - Execução paralela dos nós prontos (`DZ23_MISSION_PARALLEL_NODES`), com os resultados das dependências
+    entre marcadores com nonce.
+  - Nova tentativa por nó e nós dependentes pulados após falha.
+  - `dag_state` persistido; `resume_plan` reaproveita nós concluídos, inclusive após reinício.
+- **Ferramentas para qualquer harness:** `mission_list` e `playbook_get` espelham resources e prompts MCP
+  para clientes que não os expõem.
+- **Painel somente leitura:** comando `dashboard` (loopback, token no fragmento da URL, CSP com nonce, só
+  `GET`).
+- **`patch_validate`**, desligado por padrão (`DZ23_SANDBOX_ENABLED`, `DZ23_SANDBOX_COMMANDS`):
+  - diff aplicado num clone temporário em `HEAD`;
+  - só comandos permitidos, com ambiente mínimo, timeout e encerramento da árvore de processos;
+  - caminhos protegidos recusados;
+  - modo `docker` com `--network none`.
+- **Escopo novo:** `sandbox:execute`.
+- **CI:** job `MCP Inspector (official client)` em Linux e Windows. Valida `tools/list`, `tools/call`,
+  `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` e `prompts/get` com
+  `@modelcontextprotocol/inspector` fixado (`npm run check:inspector`; ferramenta de desenvolvimento, não
+  dependência).
+
+### Validação com clientes reais (instalação 4.1.0)
+
+- **MCP Inspector 2.7.0:** tools, resources (listagem, modelos, leitura) e prompts (listagem, renderização)
+  funcionaram.
+- **Codex CLI 0.154:** chamou `handoff_export` e `mission_claim` pela MCP, mas não oferece ao modelo
+  ferramentas de resources (`RESOURCE_TOOLS_UNAVAILABLE`). Por isso existem `mission_list` e
+  `playbook_get`.
+- **Claude Code 2.1.201 em modo `-p`:** não pôde ser testado nesta máquina (a autenticação do modo não
+  interativo estava sem crédito de API).
+
 ## 4.1.0 — 2026-09-17 — contexto de projeto seguro, missões assíncronas, travas entre harnesses e resources/prompts MCP
 
 Versão menor: as onze ferramentas da 4.0.0 mantêm contrato e respostas. Base entregue por um agente

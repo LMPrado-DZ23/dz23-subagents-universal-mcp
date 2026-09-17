@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "4.1.0",
+  "version": "4.2.0",
   "files": [
     {
       "path": ".dockerignore",
@@ -8,7 +8,7 @@
     },
     {
       "path": ".env.example",
-      "sha256": "dcbd4d4603c4c20356ba920a04473626510f095f361f6f7a811014687f987db8"
+      "sha256": "d8e22def0841d934bea8fbbb1b68d67f2d57dbd4dff25823201488da3d6ae576"
     },
     {
       "path": ".gitattributes",
@@ -28,7 +28,7 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "11d9634e39a5a79718a98ce8ea76f036658503dd5f3a3f83bd83ac494073cd89"
+      "sha256": "34caa13aef8cdf8780c6b926dbac1bb0c1210a95636f7932208927a7484d0636"
     },
     {
       "path": ".gitignore",
@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "4634a3c6afb2925faaa64cb6e8e08777b2bd8f6a5e4141c286833f41d00b3f46"
+      "sha256": "10e74a8743b6fc46d35e5ba158f04562f35143fb4c27bf342fcf9f1e42eb5ed6"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -76,15 +76,15 @@
     },
     {
       "path": "README.en.md",
-      "sha256": "49a28f954ed7ab8712f534f1f3e8fddb507d159cc788e5ccd8942abdab843f86"
+      "sha256": "ee4ce1193ca6df037ecff196999708f157e35eb2f60975d45c5116287c24ea96"
     },
     {
       "path": "README.md",
-      "sha256": "f865e079d3c2c3c475544758b5dc784c43a9bad9d21c51cc058dc1dcf977d1a6"
+      "sha256": "73efedd6426e23180755af67223688949d57b8ab4f79601a7224d0183c4f3b75"
     },
     {
       "path": "SBOM.spdx.json",
-      "sha256": "86a689eded737e8604d34cc67f203ef965230ad598799535f089dbf5648210ed"
+      "sha256": "dee660af5ad48f327211f7f0e735a7fa226a8c32f6306b628189c0ad8c63ec1e"
     },
     {
       "path": "SECURITY.md",
@@ -144,7 +144,7 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "4a2d1bed215c6c41936ae10fd2e08cd62e7e18fb9148fa4302fb6fc51b2f3b3d"
+      "sha256": "d6215d7437acede18d9ed3e38273f6f90393878507f369707930981aba63b618"
     },
     {
       "path": "docs/PROVIDER_ARCHITECTURE.md",
@@ -160,19 +160,19 @@
     },
     {
       "path": "docs/SECURITY_AND_SECRETS.md",
-      "sha256": "9e07864a8d04b2652dd7605d198f034bd871cc1d54787fe396e095e0e196734c"
+      "sha256": "d20aa0f2809ec4a788a871601df6d2ac22334c43e03ec28ceed5f414b5302cec"
     },
     {
       "path": "docs/TOOLS.md",
-      "sha256": "36db3e65feb09ae94f626f305d1c3056111bb8c4b5ec79e37eef2547b17542e6"
+      "sha256": "ab69b12c5f5208d68d2f1c5d9d7d1e48a36faecc36db8a22ce208ff1161206dc"
     },
     {
       "path": "docs/VALIDATION.md",
-      "sha256": "5c112e2c5e0ee6f29f1d59a02896b791dc74e36eb3cf2129c2a056f1c4c5634a"
+      "sha256": "f665ebd9eb492efe5915108989d351533d40c96bfc6fc9a3693be777c657bdbc"
     },
     {
       "path": "package.json",
-      "sha256": "0311d84522a0c9216055e24bc3135af355a8cd5c0c93853f89ddcc191f079082"
+      "sha256": "10f829e2f62cedfece90554da31d6d41bdbcb021348570b669dae369207f1d92"
     },
     {
       "path": "scripts/audit-public-files.mjs",
@@ -185,6 +185,10 @@
     {
       "path": "scripts/docker-healthcheck.mjs",
       "sha256": "2bb82ed00972599b7f7e448c0208fcf9f2261b426d880787b07643fbe0e19551"
+    },
+    {
+      "path": "scripts/inspector-check.mjs",
+      "sha256": "c41925eda5bfa663b54dfd91728f24f2ee3dd3648d543288690b83478e96f5c6"
     },
     {
       "path": "scripts/install-harness.mjs",
@@ -224,7 +228,7 @@
     },
     {
       "path": "src/cli.js",
-      "sha256": "3f76e3cf4d13f29fe5bf46e97812cbe32f03f934d85a218ba04e6593735df98f"
+      "sha256": "2f44e8f44b5f02ac81fd9932f89682194f0ac95731dadfa39e64e32763562842"
     },
     {
       "path": "src/concurrency.js",
@@ -232,7 +236,7 @@
     },
     {
       "path": "src/config.js",
-      "sha256": "5baa9a35e49a0d8ab4872bb848fac633ed2c403931a555166d47e2ca76b895e9"
+      "sha256": "05bf4ddde6600faa0428f8dcbb85dad81bc108a213c50a3235f2120e43c27698"
     },
     {
       "path": "src/consensus.js",
@@ -240,7 +244,7 @@
     },
     {
       "path": "src/constants.js",
-      "sha256": "d0b60edfda230850241dcd52df7300be6b13a6a4a0ca504c962d45a0dd781562"
+      "sha256": "03f1661deb811a293fad746d79a1e2fe550afc93999c2ac4275ffd6faf702d30"
     },
     {
       "path": "src/context-attachment.js",
@@ -256,7 +260,11 @@
     },
     {
       "path": "src/core.js",
-      "sha256": "40db3a2af29b342c40ddb74958feade2a979891df214a68bf98ba0d52c876921"
+      "sha256": "0605e437d61681928c1cce90a5476630dc2d511fba122d482750107cdc92b9ed"
+    },
+    {
+      "path": "src/dashboard.js",
+      "sha256": "8d7927776325c5b13c2aabcee6c348eb1d3dadb141c761bea3abb30b872c3d7d"
     },
     {
       "path": "src/endpoints.js",
@@ -268,7 +276,7 @@
     },
     {
       "path": "src/errors.js",
-      "sha256": "deca7d5c3c4740bb44f3f50132397cb5708f8a909494f32ab674287f19d53ca5"
+      "sha256": "cca339649cacd1e025ca5018207b257f72c4f7f95f694abac0b674fa0be8ee02"
     },
     {
       "path": "src/fsutil.js",
@@ -281,6 +289,10 @@
     {
       "path": "src/index.js",
       "sha256": "fd1b2382547da4b2691eeb7e655432b74136d0c3960c1dd67bd1922987788a87"
+    },
+    {
+      "path": "src/insight-tools.js",
+      "sha256": "f5e2e29f729e08fd9769cccad7e9ed277134394f5e824a9eca087dcf9e3cac4e"
     },
     {
       "path": "src/journal.js",
@@ -300,7 +312,7 @@
     },
     {
       "path": "src/mcp.js",
-      "sha256": "af52f1ed59bcc16993714ef93ed58f7612b8d1b4595f4f8b8dc59aaf741a846b"
+      "sha256": "3292b81006a333ce32ee4d6ba110ca81feaebfbbf1b3f19bee5f4500c4f4f8cc"
     },
     {
       "path": "src/memory-repair.js",
@@ -319,8 +331,12 @@
       "sha256": "12cb9468fd9cb0e2b452f38ea42d687082e4447c09b462f55dd0fda2785b9526"
     },
     {
+      "path": "src/mission-dag.js",
+      "sha256": "c62b148581681dba67b242d3179f1e2c64bf6331e9c9e63bd16351c5f510b97f"
+    },
+    {
       "path": "src/mission-manager.js",
-      "sha256": "f06251bb3ef61a3d7b04d27f23f4db6e499eb6e57483d9a6f0de9131cb77d011"
+      "sha256": "b32cd0799f3306131bf5f022f5e2689c5a8c2eabe2ca6b6e81fc4093eb9d6a5c"
     },
     {
       "path": "src/orchestration.js",
@@ -340,7 +356,7 @@
     },
     {
       "path": "src/providers.js",
-      "sha256": "c306d2a545e1cd675c6b7a6ed43a0a32ef2a6588a6be6ec2be579a1cf58aa0b2"
+      "sha256": "dd2f99334ec2084d948b94ca58b85a5c17aeace848d61f59eec623f0d690f37b"
     },
     {
       "path": "src/ratelimit.js",
@@ -351,12 +367,20 @@
       "sha256": "dd426db2c93432e71aa828479aa1862c960901d122835b4808f7d99f15321df8"
     },
     {
+      "path": "src/routing-stats.js",
+      "sha256": "2405c86ac6f1f9ca2f9aaf4aaee793538fdc6437b8479fafc20710079786b4bd"
+    },
+    {
       "path": "src/routing.js",
       "sha256": "37ec9177c6ec9d8127efe825fcc26cf8087e74902ebd1d44771b2859ed557db9"
     },
     {
       "path": "src/rpc.js",
       "sha256": "3250c2492c24df4c813e9d715c3b5572ccfc9257cd2aa6d88379d24fdfd298dc"
+    },
+    {
+      "path": "src/sandbox.js",
+      "sha256": "cb07aa10747632155b18646143cdfb40dee48e173873bca07134190d23109017"
     },
     {
       "path": "src/schema.js",
@@ -380,7 +404,7 @@
     },
     {
       "path": "src/tools.js",
-      "sha256": "38420fa9762d23331da91f84832518b37e647d0b0af4bee4a9ffd688082b9688"
+      "sha256": "be3162c1c15260d3511d8b08b9fde4943f2dd398725cc6ea49631caf97e46620"
     },
     {
       "path": "src/usage.js",
@@ -388,7 +412,7 @@
     },
     {
       "path": "src/workspace.js",
-      "sha256": "72bd2606c0efc42161ea61dba57fed3381566639e8c1d2afc6a632be853a360d"
+      "sha256": "4f2f12f4273857734a437db7bfd9537133aa4f711bbb26081b1a07b407bc5f84"
     },
     {
       "path": "test/advanced.test.js",
@@ -445,6 +469,10 @@
     {
       "path": "test/coordination.test.js",
       "sha256": "029e04596e6ba57b9a0fc115ac2655c83b8482ece882540cf2ffc5307b83163c"
+    },
+    {
+      "path": "test/dashboard-sandbox-420.test.js",
+      "sha256": "9a7cbdb50f3b9d416a493c96f92c182e897258d3173474725b14b99ec368eeac"
     },
     {
       "path": "test/hardening-audit.test.js",
@@ -505,6 +533,10 @@
     {
       "path": "test/release.test.js",
       "sha256": "4f7f08862ea5c409c4d4a88179ebd5ab5b7b94a0761e975d9f9f41f4a9326555"
+    },
+    {
+      "path": "test/roadmap-420.test.js",
+      "sha256": "a07ce7a4067efe053f11d643f74c834fae30bc765b4f0923d3ba0c97d0a4a876"
     },
     {
       "path": "test/router.test.js",

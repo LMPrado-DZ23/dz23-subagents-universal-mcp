@@ -1,5 +1,42 @@
 # Validação
 
+## v4.2.0 — clientes reais, roteamento adaptativo, grafos, painel e sandbox
+
+Data: 2026-09-17. Branch `feat/4.2.0` a partir da tag `v4.1.0`. Nenhum provider real foi chamado nos testes
+automatizados; o teste de cliente real usou a instalação 4.1.0 da máquina do mantenedor.
+
+### Clientes reais
+
+| Cliente | O que foi executado | Resultado |
+| --- | --- | --- |
+| MCP Inspector 2.7.0 (CLI oficial) | `tools/list`, `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list`, `prompts/get` contra a 4.1.0 instalada | Tudo funcionou (19 ferramentas, 97 resources, 3 prompts) |
+| MCP Inspector 2.7.0 | `npm run check:inspector` na 4.2.0 (também em CI, Linux e Windows) | 7/7 |
+| Codex CLI 0.154.0-alpha.6.2 (`codex exec`) | Pedido para listar e ler resources da MCP | O cliente não oferece ferramentas de resources ao modelo (`RESOURCE_TOOLS_UNAVAILABLE`) |
+| Codex CLI 0.154.0-alpha.6.2 | Chamar `handoff_export` e `mission_claim` | As duas chamadas concluíram pela MCP; o modelo do cliente não terminou a terceira etapa |
+| Claude Code 2.1.201 (`claude -p`) | Mesmo pedido de resources | Não executado: a autenticação do modo não interativo estava sem crédito de API nesta máquina |
+
+Conclusão aplicada nesta versão: resources e prompts MCP continuam disponíveis, e o mesmo conteúdo existe como
+ferramentas (`mission_list`, `playbook_get`) para clientes que só expõem tools.
+
+### Gates
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 95 arquivos JavaScript, lint com 0 problemas |
+| `node --test` (Windows 11, Node 24) | 249 testes: 248 aprovados, 0 falhas, 1 ignorado (modo Docker: daemon indisponível), em duas execuções |
+| `node --test` (Linux no WSL2, Node 22) | 247 aprovados, 0 falhas, 2 ignorados (sistema de arquivos com diferença de maiúsculas; e o modo Docker quando a imagem não pode ser baixada, pois o WSL desta máquina não alcança o Docker Hub), em duas execuções |
+| `npm run check:release` / `npm run check:public` | PASS, versão 4.2.0 |
+| `npm run check:inspector` | 7/7 |
+| Smoke com processo real (stdio + comando `dashboard`) | 13/13: 27 ferramentas com workspace e sandbox ligados, `routing_explain`, `cost_estimate`, plano inválido recusado, `mission_list`, `playbook_get`, `patch_validate` aprovando a correção numa cópia com a árvore original intacta, comando fora da lista recusado, página do painel com CSP, API do painel recusando sem token e respondendo com token |
+
+### Não validado
+
+- Modo Docker do sandbox nesta máquina (daemon não iniciou; no WSL a imagem não pôde ser baixada). O teste roda
+  onde houver Docker com acesso ao registro, como os runners Linux da CI.
+- Resources e prompts dentro do Claude Code interativo.
+- Roteamento adaptativo com provedores reais e cabeçalhos de cota reais (validado com respostas simuladas).
+- macOS.
+
 ## v4.1.0 — auditoria da entrega externa e correções
 
 Data: 2026-09-17. Branch `feat/4.1.0` a partir da tag `v4.0.0`. A implementação inicial veio de um
