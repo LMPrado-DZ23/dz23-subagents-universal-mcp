@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "7a6de07c791bc82d9b9afef94fb043a0d8d84c1811cad815f5a619059d8f6ebe"
+      "sha256": "eb5631616185cb427df0b46d4599388e775478f0d20a10bb8743f783f2e62f1b"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -172,7 +172,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "eda83b9f1798e1eeed6a6249c67792cf27ecd97ec20b785504664e53a5daa627"
+      "sha256": "63ec9a4ee3ce9ae3cc084855e82e27f4bacc782b4988799c375d68d49d5afc76"
     },
     {
       "path": "scripts/audit-public-files.mjs",
