@@ -1,5 +1,41 @@
 # Changelog
 
+## 4.3.0 — 2026-09-17 — provedores de conta (CLIs logadas) antes das APIs por token
+
+Versão menor: as ferramentas da 4.2.0 mantêm contrato. Os provedores de conta ficam **desligados por padrão**
+(`DZ23_ACCOUNT_PROVIDERS`), porque ligá-los gasta a assinatura da pessoa.
+
+### Novo
+
+- **Faixa de custo `account`**, entre `local` e `free-tier`: assinatura já paga, custo por token zero
+  (`cost_source: subscription`). Não precisa de `DZ23_ALLOW_PAID` e nunca libera modelo pago.
+- **Provedores de conta (`src/cli-providers.js`)**: o servidor executa a CLI oficial que **você** já logou com
+  a sua conta, sem interface, e usa a resposta como se fosse um provider.
+  - Adaptadores verificados: `claude-code` (Claude Code, login `claude auth login --claudeai`), `codex-cli`
+    (Codex, `codex login`) e `gemini-cli` (Gemini CLI, login pelo Google).
+  - Adaptadores experimentais (flags não verificadas nesta máquina): `qwen-code`, `copilot-cli`, `opencode`
+    (faixa `mixed`, porque também aceita chave) e `cursor-agent`.
+  - Cada chamada roda numa pasta temporária vazia, sem ferramentas, sem servidores MCP e sem persistir sessão;
+    variáveis que parecem credencial (`*API_KEY*`, `*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `ANTHROPIC_*`,
+    `OPENAI_*`, `AWS_*`, `AZURE_*`, `DZ23_*`…) são removidas do processo filho, para que a CLI não possa cair
+    em cobrança por token nem ver as chaves do servidor.
+  - A CLI só é usada quando o status dela diz que o login é de conta; com chave de API ou sem assinatura a
+    chamada falha com `authentication_failed` e o comando de login exato.
+  - Uma CLI por vez (`DZ23_CLI_MAX_CONCURRENCY`), tempo limite próprio (`DZ23_CLI_TIMEOUT_MS`, padrão 300 s)
+    e encerramento da árvore de processos no timeout ou cancelamento.
+  - Mensagens de limite de uso viram `quota_exhausted` com o horário de liberação lido do texto
+    ("try again at …"), então o alvo fica em cooldown até lá (máximo de uma hora).
+- **Gateway de conta OmniRoute**: provider `omniroute` (OpenAI-compatible, `http://127.0.0.1:20128/api/v1`,
+  faixa `account`, `OMNIROUTE_API_KEY`/`OMNIROUTE_API_KEY_FILE`, `DZ23_OMNIROUTE_BASE_URL`).
+- **Ferramenta `account_status`**: quais CLIs estão instaladas, quais estão logadas com conta, qual o comando
+  de login que falta e quais gateways de conta estão configurados. Nenhuma credencial é lida ou exibida.
+- **`doctor`**: nova verificação `accounts` com o mesmo resumo.
+
+### Corrigido
+
+- O teste de execução paralela de grafo usava uma janela fixa de 60 ms e falhava em máquina carregada; agora
+  sincroniza os nós com barreira.
+
 ## 4.2.0 — 2026-09-17 — roteamento adaptativo, missões em grafo, painel, sandbox de patch e validação com clientes reais
 
 Versão menor: as ferramentas da 4.1.0 mantêm contrato. Nenhuma capacidade nova com efeito fora da memória

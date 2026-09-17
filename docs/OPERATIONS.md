@@ -373,6 +373,38 @@ foi de fato feito).
 - Com `DZ23_WORKSPACE_ROOTS`, aponte só para pastas de projeto, nunca para a pasta de usuário inteira: arquivos
   de credencial conhecidos são bloqueados, mas dados sensíveis sem padrão reconhecível seriam legíveis.
 
+## Provedores de conta e gateways (4.3.0)
+
+Ligar é opt-in, porque cada chamada consome a assinatura da conta:
+
+| Variável | Para que serve |
+| --- | --- |
+| `DZ23_ACCOUNT_PROVIDERS` | `off` (padrão), `auto` (todas as CLIs instaladas) ou lista: `claude-code,codex-cli,gemini-cli,qwen-code,copilot-cli,opencode,cursor-agent` |
+| `DZ23_CLI_<NOME>_PATH` | Caminho explícito do executável: `DZ23_CLI_CLAUDE_CODE_PATH`, `DZ23_CLI_CODEX_PATH`, `DZ23_CLI_GEMINI_PATH`, `DZ23_CLI_QWEN_CODE_PATH`, `DZ23_CLI_COPILOT_PATH`, `DZ23_CLI_OPENCODE_PATH`, `DZ23_CLI_CURSOR_AGENT_PATH` |
+| `DZ23_<PROVEDOR>_MODEL` | Modelo padrão do alvo: `DZ23_CLAUDE_CODE_MODEL`, `DZ23_CODEX_CLI_MODEL`, `DZ23_GEMINI_CLI_MODEL`… |
+| `DZ23_CLI_MAX_CONCURRENCY` | Chamadas simultâneas por CLI (padrão 1) |
+| `DZ23_CLI_TIMEOUT_MS` | Tempo limite por chamada de CLI (padrão 300000) |
+| `OMNIROUTE_API_KEY` / `OMNIROUTE_API_KEY_FILE` | Chave do gateway local OmniRoute (arquivo é o recomendado) |
+| `DZ23_OMNIROUTE_BASE_URL` | Base do gateway (padrão `http://127.0.0.1:20128/api/v1`; repare no `/api/v1`) |
+
+Como usar:
+
+1. Faça login **você mesmo**, uma vez, em cada CLI: `claude auth login --claudeai`, `codex login`, `gemini`
+   (opção "Login with Google"), `qwen`, `copilot` (`/login`), `opencode auth login`, `cursor-agent login`.
+   O servidor nunca digita senha nem abre site de login.
+2. Ligue as que quiser em `DZ23_ACCOUNT_PROVIDERS` e coloque-as no começo de `DZ23_ROTATION`.
+3. Confira com `node src/index.js doctor` (verificação `accounts`) ou com a ferramenta `account_status`.
+
+O que o servidor faz em cada chamada: pasta temporária vazia como diretório de trabalho, sem ferramentas, sem
+servidores MCP, sem persistir sessão, ambiente sem nada que pareça credencial, uma chamada por vez e
+encerramento da árvore de processos no timeout. Se a CLI estiver logada com chave de API (ou sem assinatura),
+a chamada é recusada com `authentication_failed` em vez de gastar tokens pagos. Limite de uso atingido vira
+`quota_exhausted` e o alvo entra em cooldown até o horário que a própria CLI informa (no máximo uma hora).
+
+Os adaptadores `qwen-code`, `copilot-cli`, `opencode` e `cursor-agent` são experimentais: as flags não foram
+verificadas com as CLIs instaladas. No Windows, executáveis `.cmd`/`.bat` criados por instalação npm podem não
+iniciar (o servidor não usa shell); nesses casos aponte `DZ23_CLI_<NOME>_PATH` para o `.js` do pacote.
+
 ## Painel, roteamento aprendido e sandbox (4.2.0)
 
 - **Painel:** `node src/index.js dashboard` (ou `--port 0` para porta livre) imprime uma URL

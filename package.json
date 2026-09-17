@@ -1,6 +1,6 @@
 {
   "name": "@dz23/subagents-universal-mcp",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "MCP text delegation router with shared mission memory and bounded parallel model workers",
   "type": "module",
   "bin": {

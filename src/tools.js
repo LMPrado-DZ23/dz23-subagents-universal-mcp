@@ -48,7 +48,8 @@ const BASE_TOOL_POLICIES = {
   playbook_get: {scopes: ['memory:read'], costClass: 'light', billable: false},
   routing_explain: {scopes: ['provider:discover'], costClass: 'light', billable: false},
   cost_estimate: {scopes: ['provider:discover'], costClass: 'light', billable: false},
-  patch_validate: {scopes: ['sandbox:execute'], costClass: 'expensive', billable: false}
+  patch_validate: {scopes: ['sandbox:execute'], costClass: 'expensive', billable: false},
+  account_status: {scopes: ['provider:discover'], costClass: 'light', billable: false}
 };
 const WORKSPACE_TOOLS = new Set(['workspace_read', 'workspace_search', 'git_readonly']);
 export const TOOL_POLICIES = Object.freeze(Object.fromEntries(Object.entries(BASE_TOOL_POLICIES).map(([name, policy]) => [name, Object.freeze({
@@ -275,6 +276,10 @@ export function buildTools(limits = toolLimits()) {
         prompt_chars: {type: 'integer', minimum: 0, maximum: 1000000}, models: {type: 'integer', minimum: 2, maximum: 5, default: 3}, roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
         max_agents: {type: 'integer', minimum: 1, maximum: 7}, synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic'}, task_type: {type: 'string', enum: TASK_TYPES}}),
       annotations: annotations('Estimate call cost', {readOnly: true, idempotent: true})},
+    {name: 'account_status', title: 'Account providers status',
+      description: 'Which AI CLIs (Claude Code, Codex, Gemini CLI, Qwen Code, Copilot CLI, OpenCode, Cursor Agent) are installed and logged in with an account or subscription, and the login command for each. Account providers are used before per-token APIs. No model calls.',
+      inputSchema: object({refresh: {type: 'boolean', default: false, description: 'Re-check now instead of using the 5-minute cache.'}}),
+      annotations: annotations('Account providers status', {readOnly: true, idempotent: true})},
     {name: 'patch_validate', title: 'Validate patch in sandbox',
       description: 'Apply a unified diff to a throwaway copy of the repository at HEAD and run one allowlisted test command there (DZ23_SANDBOX_COMMANDS, exact match). The original working tree is never modified; nothing is committed or pushed. Process mode does not isolate the network; docker mode runs with --network none. Returns exit code, timeout flag and masked output tails.',
       inputSchema: object({workspace: text(4096, 'Configured workspace root (git repository).'), patch: text(1_000_000, 'Unified diff (git diff format).'),

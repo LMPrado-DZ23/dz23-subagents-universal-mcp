@@ -330,6 +330,30 @@ a cadeia inteira.
 
 As ferramentas novas existem só em MCP (stdio e `/mcp`); a API REST continua com as rotas da 4.0.0.
 
+## Ferramentas adicionadas na 4.3.0
+
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
+| --- | --- | --- | --- | --- |
+| `account_status` | `refresh` | CLIs de IA instaladas, quais estão logadas com conta, o comando de login que falta e os gateways de conta configurados | `provider:discover` | sem rede |
+
+`account_status` não lê nem mostra credenciais: para cada CLI ele chama o próprio comando de status dela (ou
+confere a existência do arquivo de login) e devolve só instalado/logado, o método (`claude.ai max`, `chatgpt`,
+`google_oauth`…) e o comando de login. O campo `selected` diz se a CLI está habilitada em
+`DZ23_ACCOUNT_PROVIDERS`.
+
+### Provedores de conta na ordem de roteamento
+
+A faixa `account` entra entre `local` e `free-tier`: com `free-first` a ordem é modelos locais, assinaturas
+já pagas (CLIs logadas e gateways como o OmniRoute), APIs de camada gratuita e depois o resto. Chamadas de
+conta são registradas com custo 0 e `cost_source: subscription`, e não precisam de `DZ23_ALLOW_PAID`.
+
+Alvos de conta: `claude-code:<sonnet|opus|haiku>`, `codex-cli:default`, `gemini-cli:default`,
+`qwen-code:default`, `copilot-cli:default`, `opencode:default`, `cursor-agent:default` e
+`omniroute:<modelo do gateway>`. Eles só aparecem quando `DZ23_ACCOUNT_PROVIDERS` os seleciona (`auto` =
+todas as CLIs instaladas) e o executável existe na máquina. Um id de modelo que pareça flag (começando com
+`-`) ou com caracteres fora de letras, dígitos e `. _ - / @ :` é recusado com `model_not_found` antes de
+qualquer execução.
+
 ## Ferramentas adicionadas na 4.2.0
 
 | Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |

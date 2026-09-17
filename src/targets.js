@@ -8,7 +8,8 @@ export const targetKey = target => `${target.name}:${target.model}`;
 const PAID_TIERS = Object.freeze(['paid', 'low-cost']);
 
 export function tierRank(tier) {
-  return ({local: 0, 'free-tier': 1, mixed: 2, 'low-cost': 3, paid: 4})[tier] ?? 9;
+  // Accounts (subscription CLIs, account gateways) come right after local models and before per-token APIs.
+  return ({local: 0, account: 1, 'free-tier': 2, mixed: 3, 'low-cost': 4, paid: 5})[tier] ?? 9;
 }
 
 /**

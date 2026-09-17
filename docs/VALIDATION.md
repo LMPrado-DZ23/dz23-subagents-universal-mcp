@@ -1,5 +1,53 @@
 # Validação
 
+## v4.3.0 — provedores de conta (CLIs logadas) antes das APIs
+
+Data: 2026-09-17. Branch `feat/4.3.0` a partir da tag `v4.2.0`. As CLIs de conta desta máquina foram
+executadas de verdade; as APIs por token não foram chamadas, exceto o modelo gratuito da revisão independente.
+
+### Contas reais nesta máquina
+
+| CLI | Estado lido pelo `account_status` | Chamada real |
+| --- | --- | --- |
+| Codex 0.154.0-alpha.6.2 | `logged_in: true`, método `chatgpt` | Executada: a própria CLI respondeu "You've hit your usage limit … try again at Sep 19th, 2026 11:02 AM"; o servidor classificou como `quota_exhausted` e colocou o alvo em cooldown até o horário informado |
+| Claude Code 2.1.201 | `logged_in: false`, método `api_key_or_no_subscription` | Recusada antes de qualquer execução, com `authentication_failed` e a dica `account_login_required: run claude auth login --claudeai` (esta máquina está com chave gerenciada e sem assinatura ativa na CLI) |
+| Gemini CLI 0.59 | `logged_in: false`, método `none` (sem `~/.gemini/oauth_creds.json`) | Não executada |
+| Qwen Code, Copilot CLI, OpenCode, Cursor Agent | `installed: false` | Não instaladas; adaptadores marcados como experimentais |
+| Gateway OmniRoute (container `omniroute`, `http://127.0.0.1:20128/api/v1`) | `configured: true` com `OMNIROUTE_API_KEY_FILE` | `/models` real respondeu 243 modelos. As conversas falharam **no gateway**: `auto/subscription` 401, `auto/best-free` 403 (cota) e combinações inexistentes 404 — configuração do OmniRoute, não do roteador |
+
+O caminho de resposta bem-sucedida de uma CLI de conta foi exercitado com CLIs falsas (scripts node apontados
+por `DZ23_CLI_<NOME>_PATH`), inclusive no smoke com processo real, porque nenhuma assinatura de CLI estava
+utilizável nesta máquina no momento da entrega.
+
+### Gates
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 97 arquivos JavaScript, lint com 0 problemas |
+| `node --test` (Windows 11, Node 24) | 258 testes: 258 aprovados, 0 falhas |
+| `node --test` (Linux no WSL2, Node 22) | 255 aprovados, 0 falhas (execução anterior apontou o teste de paralelismo de grafo como sensível a carga; ele foi refeito com barreira e passou em três execuções seguidas) |
+| `npm run check:release` / `npm run check:public` | PASS, versão 4.3.0 |
+| `npm run check:inspector` | 7/7 |
+| Smoke com processo real (stdio, `DZ23_ACCOUNT_PROVIDERS=auto`) | 13/13: `account_status` com o login real do Codex e sem nenhum segredo, OmniRoute listado como gateway, contas no início da ordem de roteamento, `delegate` respondido pela CLI com `cost_source: subscription` e custo 0, nenhuma variável de credencial ou `DZ23_` no processo filho, CLI executada sem ferramentas/MCP numa pasta temporária fora do projeto, modelo em forma de flag recusado e tentativa real no Codex tratada com honestidade |
+
+### Revisão independente de segurança
+
+Revisão adversarial do novo módulo por modelo gratuito pelo próprio DZ23 MCP (`cerebras:gpt-oss-120b`).
+Achado aproveitado: o id do modelo chega à linha de comando da CLI, então um pedido como
+`codex-cli:--flag` poderia virar opção extra. Correção aplicada: o id do modelo é validado antes de executar
+(`model_not_found`), com teste. A rotação/política já recusava o mesmo pedido antes, então passaram a ser duas
+camadas. Achados não aproveitados, com motivo: injeção por `stdin`/`$(...)` não se aplica (nenhuma chamada usa
+shell); vazamento de variáveis quaisquer já estava corrigido no ambiente reduzido; o texto de erro da CLI não é
+repassado ao cliente (só o código de saída). O risco de binário trocado no `PATH` é real e está documentado em
+SECURITY_AND_SECRETS com a recomendação de fixar `DZ23_CLI_<NOME>_PATH`.
+
+### Não validado
+
+- Resposta bem-sucedida das CLIs reais Claude Code, Gemini, Qwen Code, Copilot CLI, OpenCode e Cursor Agent
+  (falta login de conta ou instalação nesta máquina). As flags dos quatro últimos não foram verificadas.
+- Conversas pelo gateway OmniRoute (o gateway respondeu 401/403/404 nas combinações testadas).
+- Provedores de conta em Linux/macOS: os caminhos padrão de instalação usados são os do Windows mais o `PATH`.
+
 ## v4.2.0 — clientes reais, roteamento adaptativo, grafos, painel e sandbox
 
 Data: 2026-09-17. Branch `feat/4.2.0` a partir da tag `v4.1.0`. Nenhum provider real foi chamado nos testes

@@ -97,6 +97,36 @@ Chamadas canceladas ou com timeout depois de enviadas ao provider entram no orç
 - Travas de missão coordenam harnesses que cooperam; não são controle de acesso. O log de auditoria detecta
   edição de linhas, mas quem controla o diretório de estado pode reescrevê-lo por inteiro.
 
+## Provedores de conta (4.3.0)
+
+- O servidor **não faz login**: nunca digita usuário, senha ou token, não abre página de login e não lê os
+  arquivos de credencial das CLIs para extrair token. O login é feito por você, uma vez, na CLI oficial.
+  Automatizar login de site com a sua senha violaria os termos dos provedores e não está implementado.
+- Uma CLI só é usada quando o status dela indica conta/assinatura. Login por chave de API é recusado
+  (`authentication_failed`), senão um "provedor de conta" poderia cobrar por token sem você perceber.
+  **Não existe fallback automático de conta para API**: isso é decisão da rotação.
+- O processo filho recebe ambiente reduzido: qualquer variável com cara de credencial (`*API_KEY*`, `*TOKEN*`,
+  `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*PRIVATE_KEY*`) e os prefixos de provedor/nuvem (`ANTHROPIC_`,
+  `OPENAI_`, `GOOGLE_API`, `GOOGLE_GENAI`, `VERTEX`, `DASHSCOPE_`, `OPENROUTER_`, `AWS_`, `AZURE_`,
+  `CLAUDE_CODE_`, `DZ23_`) são removidos. Consequência prática: quem autentica o Claude Code por
+  `CLAUDE_CODE_OAUTH_TOKEN` precisa também do login de conta na CLI.
+- A CLI roda numa pasta temporária vazia, com ferramentas e servidores MCP desligados por flag e sem persistir
+  sessão, para não ler o seu repositório nem executar comandos por conta própria. Isso depende das flags da
+  CLI: trate uma CLI de terceiro como código em que você já confia nesta máquina.
+- O id do modelo entra na linha de comando da CLI, então ele é validado antes: precisa começar com letra ou
+  dígito e usar só letras, dígitos e `. _ - / @ :`. Assim um pedido como `codex-cli:--flag` não vira opção.
+- O executável é procurado em `DZ23_CLI_<NOME>_PATH`, nos caminhos oficiais de instalação e no `PATH`. Quem
+  puder escrever numa pasta do seu `PATH` (ou na pasta de instalação da CLI) escolhe o binário que o servidor
+  executa — o mesmo risco que já existe para você no terminal. Com `DZ23_CLI_<NOME>_PATH` você fixa o caminho.
+- O status de login fica em cache por 5 minutos: um logout feito agora pode ser percebido só depois disso, e a
+  chamada seguinte falha com erro de autenticação (nunca cai para API paga).
+- `account_status` e o `doctor` mostram só instalado/logado/método/comando de login. Nenhum valor de
+  credencial entra em log, erro ou memória de missão: o texto de erro da CLI é usado apenas para classificar a
+  falha, e o detalhe enviado ao cliente é uma frase fixa com o código de saída.
+- O gateway OmniRoute é um provider HTTP comum apontado para `127.0.0.1`: a chave vem de
+  `OMNIROUTE_API_KEY_FILE` (recomendado) ou da variável, e quem controla o gateway controla o destino final
+  das mensagens.
+
 ## Painel e sandbox de patch (4.2.0)
 
 - O painel escuta só em `127.0.0.1`, recusa `Host` diferente de loopback, exige o token aleatório da execução

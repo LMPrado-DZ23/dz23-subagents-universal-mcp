@@ -13,7 +13,7 @@ import {claimMission, releaseMission, exportHandoff, assertLease} from './coordi
 import {appendAudit} from './audit-log.js';
 import {parseStructured, structuredField, limitResult, limitText, withIdempotency, cacheKey, cacheGet, cacheSet, localOnlyRouter} from './tool-extensions.js';
 import {listResources, listResourceTemplates, readResource, listPrompts, getPrompt} from './mcp-resources.js';
-import {explainRouting, estimateCost, listMissionsTool, playbook} from './insight-tools.js';
+import {explainRouting, estimateCost, listMissionsTool, playbook, accountStatus} from './insight-tools.js';
 import {patchValidate} from './sandbox.js';
 
 const DATE_VERSION = /^\d{4}-\d{2}-\d{2}$/;
@@ -207,7 +207,8 @@ function toolRunner(router, memory) {
     playbook_get: args => playbook(args),
     routing_explain: args => explainRouting(router, args),
     cost_estimate: args => estimateCost(router, args),
-    patch_validate: args => patchValidate(router.cfg, args)
+    patch_validate: args => patchValidate(router.cfg, args),
+    account_status: args => accountStatus(router, args)
   };
 }
 

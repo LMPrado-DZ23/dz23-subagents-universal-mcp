@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "4.2.0",
+  "version": "4.3.0",
   "files": [
     {
       "path": ".dockerignore",
@@ -8,7 +8,7 @@
     },
     {
       "path": ".env.example",
-      "sha256": "d44c3d02ebe05b0fdce95f8dc4481ada96103c20d4e00af88dbde4231826dcb6"
+      "sha256": "c732fb026ee3cceaa724239c3b282ff89740eb04e05e657dcdf62d87b0fb302d"
     },
     {
       "path": ".gitattributes",
@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "bf71ab08d0b4dba8b44d3edb4be0c3ab5cb08f5e0118cd487e3678e337f846dd"
+      "sha256": "7a6de07c791bc82d9b9afef94fb043a0d8d84c1811cad815f5a619059d8f6ebe"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -76,15 +76,15 @@
     },
     {
       "path": "README.en.md",
-      "sha256": "ee4ce1193ca6df037ecff196999708f157e35eb2f60975d45c5116287c24ea96"
+      "sha256": "8235ce0af27d47b7ea0398b12c5e89b55d5669897c32e762b3e594ceafaf09df"
     },
     {
       "path": "README.md",
-      "sha256": "73efedd6426e23180755af67223688949d57b8ab4f79601a7224d0183c4f3b75"
+      "sha256": "b65f0cafe60b842f23f53fdf39470f3871e263e17b6b06fcaef8c337195c3ec2"
     },
     {
       "path": "SBOM.spdx.json",
-      "sha256": "dee660af5ad48f327211f7f0e735a7fa226a8c32f6306b628189c0ad8c63ec1e"
+      "sha256": "0ea3f0e0b971e0f7ba8075e28d1846dee391065f223997f0373aff8aa6a3020a"
     },
     {
       "path": "SECURITY.md",
@@ -144,7 +144,7 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "8e0458d6527f9775546b0c67c39b71004ae25d96deed62d48fd11443df8d159c"
+      "sha256": "e698e61380a5786f11f3333bb6438b676dff57c91b843e7d2b6a2cfd9c553569"
     },
     {
       "path": "docs/PROVIDER_ARCHITECTURE.md",
@@ -160,19 +160,19 @@
     },
     {
       "path": "docs/SECURITY_AND_SECRETS.md",
-      "sha256": "9420d342416c8864a60b47bc5251e64dce4c29f1fa25e4f86d7ceb672e2527bb"
+      "sha256": "070e1b3d3880c863b51ca1ed5c6fef9f7edd2ac4d0eae3ba475b05b7a16ea023"
     },
     {
       "path": "docs/TOOLS.md",
-      "sha256": "10c908922a2be25d0786ce175506d77d231953e58583d73569a714710dbab75b"
+      "sha256": "d6fe51d25b31e7937dfb52271b455af133664b6047d82c57fd57d2fb1a42b9a9"
     },
     {
       "path": "docs/VALIDATION.md",
-      "sha256": "652fb713f5fe1290d92d3591f4005e7f66d930f5a458e7ab62887bdff01ada7f"
+      "sha256": "5cc3e672239ac01a38bec1dece0a25999e2c10b4e8e59a1d0c9de73d3c50d5ca"
     },
     {
       "path": "package.json",
-      "sha256": "10f829e2f62cedfece90554da31d6d41bdbcb021348570b669dae369207f1d92"
+      "sha256": "eda83b9f1798e1eeed6a6249c67792cf27ecd97ec20b785504664e53a5daa627"
     },
     {
       "path": "scripts/audit-public-files.mjs",
@@ -224,11 +224,15 @@
     },
     {
       "path": "src/budget.js",
-      "sha256": "674f1e1b2d5f94090cb087e7c249cc59d462a4ea6ff961fc8753b927fc5b39bd"
+      "sha256": "bdf4a0a56153b1ea3b905d8174d37d3b9f676fe21da485583482863d0cd4a2c1"
+    },
+    {
+      "path": "src/cli-providers.js",
+      "sha256": "f07f683f6035b7a092f8f81b40175881e2188fa3f02f8bd5754a9e1bbd67966b"
     },
     {
       "path": "src/cli.js",
-      "sha256": "2f44e8f44b5f02ac81fd9932f89682194f0ac95731dadfa39e64e32763562842"
+      "sha256": "79838312a1b7348c23ed98c81cf46325ea2eb47bec4a3ce856a41c8ac2bcadeb"
     },
     {
       "path": "src/concurrency.js",
@@ -292,7 +296,7 @@
     },
     {
       "path": "src/insight-tools.js",
-      "sha256": "f5e2e29f729e08fd9769cccad7e9ed277134394f5e824a9eca087dcf9e3cac4e"
+      "sha256": "d1493f861515c24b67d398d1c853d14ae9bd717ee51b99fc9c469b14f195e3ce"
     },
     {
       "path": "src/journal.js",
@@ -312,7 +316,7 @@
     },
     {
       "path": "src/mcp.js",
-      "sha256": "3292b81006a333ce32ee4d6ba110ca81feaebfbbf1b3f19bee5f4500c4f4f8cc"
+      "sha256": "22e8f07e3e8a10c2892694ae437fc1716f8fcdaa362eae42e78267e9ad3103df"
     },
     {
       "path": "src/memory-repair.js",
@@ -356,7 +360,7 @@
     },
     {
       "path": "src/providers.js",
-      "sha256": "dd2f99334ec2084d948b94ca58b85a5c17aeace848d61f59eec623f0d690f37b"
+      "sha256": "d24dc5a16f5b859377b27a4ef9ff7e6d34e5a5c966f52d9363fe0afe2ff76da8"
     },
     {
       "path": "src/ratelimit.js",
@@ -396,7 +400,7 @@
     },
     {
       "path": "src/targets.js",
-      "sha256": "6c306ee914c8c33a0b7f332e55efa1913252c5d18d2b92ad5d3977afb9936620"
+      "sha256": "9e4b109133e50b12a25140c75898e38f3e319d0139b1d878aaf4313aeb409a8d"
     },
     {
       "path": "src/tool-extensions.js",
@@ -404,7 +408,7 @@
     },
     {
       "path": "src/tools.js",
-      "sha256": "be3162c1c15260d3511d8b08b9fde4943f2dd398725cc6ea49631caf97e46620"
+      "sha256": "9d455df9cd436b2336c17b9f65e4abb06b4225528deb7c78373e540580c20926"
     },
     {
       "path": "src/usage.js",
@@ -413,6 +417,10 @@
     {
       "path": "src/workspace.js",
       "sha256": "4f2f12f4273857734a437db7bfd9537133aa4f711bbb26081b1a07b407bc5f84"
+    },
+    {
+      "path": "test/account-providers-430.test.js",
+      "sha256": "bb891b9d9a26a65d47760fbdf335196809ccc56ab4e02d2899b27cf63e481d3d"
     },
     {
       "path": "test/advanced.test.js",
@@ -536,7 +544,7 @@
     },
     {
       "path": "test/roadmap-420.test.js",
-      "sha256": "a07ce7a4067efe053f11d643f74c834fae30bc765b4f0923d3ba0c97d0a4a876"
+      "sha256": "8d90ebbb4545410c38a0a276cd3c6d08a467ea37e48d39dd884bfaa4187b3b73"
     },
     {
       "path": "test/router.test.js",

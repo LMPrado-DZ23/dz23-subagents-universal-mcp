@@ -79,10 +79,17 @@ test('a mission graph runs independent nodes in parallel, passes dependency resu
   let active = 0;
   let peak = 0;
   let flaky = 0;
+  const started = new Set();
   const s = await stack(t, {caller: async (target, messages) => {
     const text = JSON.stringify(messages);
+    const node = /Your task \((\w+)\)/.exec(text)?.[1];
+    started.add(node);
     active++; peak = Math.max(peak, active);
-    await new Promise(resolve => setTimeout(resolve, 60));
+    // Barrier instead of a fixed sleep: api and ui each wait (bounded) for the other to start, so a loaded
+    // machine cannot make truly parallel nodes look sequential, while sequential execution still leaves peak at 1.
+    for (let waited = 0; ['api', 'ui'].includes(node) && !(started.has('api') && started.has('ui')) && waited < 3000; waited += 10) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
     active--;
     if (text.includes('Your task (tests)') && flaky++ < 2) throw Object.assign(new Error('prompt is too long'), {status: 413});
     const id = /Your task \((\w+)\)/.exec(text)[1];
