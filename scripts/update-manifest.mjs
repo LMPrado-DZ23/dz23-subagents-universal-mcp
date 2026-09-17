@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {root,forbiddenPath,secretDetected} from './release-check.mjs';
-const rootFiles=['.dockerignore','.env.example','.gitattributes','.gitignore','COMECE_AQUI.txt','HERMES_SELF_INSTALL_PROMPT.txt','PUBLICAR_COM_HARNESS.txt','PUBLICAR_WINDOWS.cmd','Dockerfile','compose.yaml','package.json','LICENSE','README.md','README.en.md','CHANGELOG.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','SECURITY.md','SUPPORT.md','NOTICE','SBOM.spdx.json'];
+const rootFiles=['.dockerignore','.env.example','.gitattributes','.gitignore','COMECE_AQUI.txt','HERMES_SELF_INSTALL_PROMPT.txt','PUBLICAR_COM_HARNESS.txt','PUBLICAR_WINDOWS.cmd','Dockerfile','compose.yaml','package.json','LICENSE','README.md','README.en.md','CHANGELOG.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','SECURITY.md','SUPPORT.md','NOTICE','SBOM.spdx.json','AUDIT_REPORT.md'];
 function collect(folder){return fs.readdirSync(path.join(root,folder),{withFileTypes:true}).flatMap(entry=>{
   const name=`${folder}/${entry.name}`;if(forbiddenPath(name))return[];
   if(entry.isSymbolicLink())throw new Error('Symbolic links are not release inputs');

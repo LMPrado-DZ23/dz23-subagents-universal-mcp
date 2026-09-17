@@ -310,3 +310,13 @@ numa candidata interna, nunca publicada.
 
 Carregamento do .env relativo à instalação e geração de snippets com caminhos reais.
 A suíte de 14 testes da base foi reexecutada antes das mudanças desta preparação.
+## 4.1.0 — 2026-09-17 — Tool Gateway, contexto seguro e coordenação
+
+- Adicionado Tool Gateway declarativo com scopes, custo, deadline, abort, orçamento, redaction e eventos de auditoria.
+- Adicionadas ferramentas de workspace/Git readonly, contexto nonce-marked e privacy auto com redaction de segredos e PII brasileira.
+- Adicionados jobs assíncronos de missão com cancelamento, pausa, retomada, prazo, estagnação e conclusão condicionada a evidência do harness.
+- Adicionados leases entre harnesses, handoff Markdown e audit log append-only com hash encadeado.
+- Adicionados `resources/list/read`, `prompts/list/get`, `output_schema`, `detail`, `max_response_chars`, cache opt-in e idempotência.
+- Preservada a política única de custo free-first; nenhuma API paga é habilitada implicitamente.
+- Sandbox de patch não foi incluído nesta versão; permanece no roadmap 5.0.
+

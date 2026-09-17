@@ -18,4 +18,8 @@ test('MCP initialize and tools/list are compatible JSON-RPC payloads', async()=>
   const list=await h({method:'tools/list'});
   const names=list.tools.map(t=>t.name);
   for(const n of ['delegate','swarm_run','mission_status','memory_checkpoint','health_check']) assert.ok(names.includes(n));
+  const resources=await h({method:'resources/list'});
+  assert.equal(resources.resources[0].uri,'dz23://mission/{project_id}/{mission_id}');
+  const prompts=await h({method:'prompts/list'});
+  assert.ok(prompts.prompts.some(p=>p.name==='audit_project'));
 });

@@ -199,3 +199,18 @@ streaming são `false` porque não são expostos). `model_capabilities` / `catal
 reproduzem o que o catálogo do provider declara e ficam `unknown` quando não há informação.
 
 `config/agents.example.json` é apenas referência humana; o runtime não o carrega.
+
+
+## Adições da 4.1.0
+
+A 4.1 adiciona um Tool Gateway declarativo: cada adapter possui escopos, classe de custo, indicação de cobrança, prazo, abort, orçamento, redaction, evento de auditoria e origem de habilitação. O registro não substitui a política única do roteador.
+
+Novas ferramentas: `workspace_read`, `workspace_search`, `git_readonly`, `mission_start`, `mission_status_job`, `mission_pause`, `mission_resume`, `mission_cancel`, `mission_claim`, `mission_release` e `handoff_export`. O contexto de projeto em `delegate`, `consensus` e `swarm_run` é nonce-marked e tratado como dado não confiável.
+
+`resources/list`, `resources/read`, `prompts/list` e `prompts/get` são recursos MCP somente leitura. Tasks oficiais ainda não são anunciadas, conforme o roadmap; jobs usam as ferramentas `mission_*` até a validação protocolar específica.
+
+`output_schema` valida JSON retornado; `detail` e `max_response_chars` limitam a resposta; `idempotency_key` evita cobrança duplicada em repetição; `cache=true` só funciona com `DZ23_RESPONSE_CACHE_TTL_MS` maior que zero. Privacy `auto` mascara segredos e PII brasileira antes do contexto ser enviado.
+
+Leases são persistidos em `state/leases` e retornam `mission_busy` para outro harness. O audit log append-only em `state/audit/events.jsonl` encadeia hashes SHA-256 e grava somente metadados redigidos.
+
+O sandbox de patch **não faz parte da 4.1** e permanece reservado ao PR 8/versão 5.0, desligado e não exposto nesta etapa.

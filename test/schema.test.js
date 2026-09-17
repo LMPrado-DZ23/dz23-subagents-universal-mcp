@@ -65,7 +65,7 @@ test('lengths count Unicode code points, not UTF-16 units', () => {
 test('valid arguments receive documented defaults without mutating the input', () => {
   const input = {prompt: 'review this'};
   const out = validate(schemaOf('delegate'), input);
-  assert.deepEqual(out, {project_id: 'default', prompt: 'review this', role: 'worker', target: 'auto'});
+  assert.deepEqual(out, {project_id: 'default', prompt: 'review this', role: 'worker', target: 'auto', detail: 'normal', privacy: 'auto', cache: false});
   assert.deepEqual(input, {prompt: 'review this'});
   const swarm = validate(schemaOf('swarm_run'), {goal: 'build'});
   assert.equal(swarm.routing_strategy, 'first');

@@ -295,3 +295,13 @@ observam chamadas simultâneas, sem depender de janelas de 30/40 ms. Mutações 
 (limite global de uma chamada, limite por alvo desabilitado, todos os workers no primeiro
 alvo) foram detectadas pelos testes. O pacote extraído foi retestado em pasta com espaços,
 com 27 testes aprovados, dry-run do publicador e smoke stdio real.
+
+## 4.1.0 — validação desta etapa
+
+Data: 2026-09-17. Ambiente: Ubuntu 24.04, Node.js 22. A execução final observada foi `npm run check` e `npm test`: 218 testes aprovados, 0 falhas e 1 teste ignorado por depender de filesystem case-insensitive. Foram cobertos workspace seguro, contexto nonce-marked, redaction de segredo/PII, prompt-injection warning, resources/prompts, Tool Gateway, leases e audit log encadeado.
+
+A auditoria adicional verificou que o audit log de runtime é ignorado pelo release e que o sandbox de patch não foi exposto nesta versão. Nenhum provider real foi chamado durante os testes desta etapa.
+
+### Não validado
+
+Windows/Node 22 e Node 24 em CI, MCP Inspector, tasks MCP oficiais, providers reais, endpoints locais Ollama/LM Studio/vLLM, OmniRoute, Windows Credential Manager, webhook, OTLP, upgrade dry-run, fake-provider de caos e sandbox de patch da versão 5.0.
