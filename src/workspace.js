@@ -9,8 +9,10 @@ import {maskSecrets} from './privacy.js';
 const PROTECTED = new RegExp([
   String.raw`\.env(?:\..*)?`, String.raw`.*\.env`, String.raw`\.(?:npmrc|yarnrc(?:\.yml)?|pypirc|netrc|git-credentials|htpasswd|pgpass|claude\.json)`, '_netrc',
   String.raw`\.(?:git|ssh|gnupg|aws|azure|kube|docker)`, String.raw`id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?`,
-  String.raw`.*\.(?:pem|key|p12|pfx|jks|keystore|kdbx|tfstate|ppk)`, String.raw`(?:credentials?|secrets?)(?:\.(?:json|ya?ml|txt|toml|ini|conf|csv))?`,
-  String.raw`.*(?:secret|password|credential|api[_-]?key|access[_-]?token|service[_-]?account).*\.(?:json|ya?ml|txt|toml|ini|conf)`
+  String.raw`.*\.(?:pem|key|p12|pfx|jks|keystore|kdbx|tfstate|ppk)`,
+  // Credential-like names without an extension or with a data/config extension (source files such as
+  // secretStore.js stay readable).
+  String.raw`[^.]*(?:secret|passw(?:or)?d|credential|private[_-]?key|api[_-]?key|access[_-]?token|auth[_-]?token|service[_-]?account|keyfile)[^.]*(?:\.(?:json|ya?ml|txt|toml|ini|conf|cfg|env|properties|xml|csv))?`
 ].map(p => `(?:${p})`).join('|').replace(/^/, '^(?:').concat(')$'), 'i');
 const UNC = /^(?:\\\\|\/\/)/;
 const SKIP_DIRS = new Set(['node_modules']);

@@ -226,8 +226,9 @@ aparecem em `tools/list` (e só podem ser chamadas) quando `DZ23_WORKSPACE_ROOTS
 - Nomes protegidos nunca são lidos, listados ou buscados: `.env*`, `*.env`, `.npmrc`, `.yarnrc`,
   `.pypirc`, `.netrc`, `.git-credentials`, `.htpasswd`, `.pgpass`, `.git`, `.ssh`, `.gnupg`, `.aws`,
   `.azure`, `.kube`, `.docker`, chaves `id_*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
-  `*.keystore`, `*.kdbx`, `*.tfstate`, `credentials*`, `secrets*` e arquivos de configuração com
-  secret/password/credential/api_key/access_token/service_account no nome.
+  `*.keystore`, `*.kdbx`, `*.tfstate` e nomes com secret, password, credential, private_key, api_key,
+  access_token, auth_token, service_account ou keyfile sem extensão ou com extensão de dados/configuração
+  (por exemplo `aws_credentials`, `gcp-service-account.json`); arquivos de código como `secretStore.js` continuam legíveis.
 - Segredos com formato conhecido (chaves `sk-`, `gsk_`, `AIza`, `AKIA`, tokens do GitHub e Slack, JWT,
   chaves privadas PEM, atribuições `*_API_KEY=`/`*_TOKEN=`) são mascarados no conteúdo lido, na busca
   e na saída do Git.

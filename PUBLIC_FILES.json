@@ -164,7 +164,7 @@
     },
     {
       "path": "docs/TOOLS.md",
-      "sha256": "fd9ed130b7aead895547fc266c8e8c03d13440e8c7cceb8aec5fe222d6ab3a7e"
+      "sha256": "36db3e65feb09ae94f626f305d1c3056111bb8c4b5ec79e37eef2547b17542e6"
     },
     {
       "path": "docs/VALIDATION.md",
@@ -388,7 +388,7 @@
     },
     {
       "path": "src/workspace.js",
-      "sha256": "0f3d9e89fd37cdcf728a20ddda8c8586ed9bcfb2d764dc870d59e7d9448fb839"
+      "sha256": "72bd2606c0efc42161ea61dba57fed3381566639e8c1d2afc6a632be853a360d"
     },
     {
       "path": "test/advanced.test.js",
@@ -400,7 +400,7 @@
     },
     {
       "path": "test/audit-410-tools.test.js",
-      "sha256": "dff20db501b4281c2c25dad018052e0225c02fea3dd371f06204efa0a94996c2"
+      "sha256": "0ade3ba9ac96d862e673197494243db365be23513782fa687d4593a8ce9cfa7e"
     },
     {
       "path": "test/audit-fixes.test.js",

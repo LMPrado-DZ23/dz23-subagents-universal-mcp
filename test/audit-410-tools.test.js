@@ -71,10 +71,15 @@ test('workspace reads block credential files and mask secrets inside allowed fil
   const s0 = await stack(t);
   const dir = await project(s0.root);
   const s = await stack(t, {cfg: {workspaceRoots: [dir]}});
-  for (const name of ['.npmrc', '.git-credentials', '.netrc', 'cert.pfx', 'prod.env', 'id_ed25519']) {
+  for (const name of ['.npmrc', '.git-credentials', '.netrc', 'cert.pfx', 'prod.env', 'id_ed25519', 'aws_credentials', 'my_secret_key.txt', 'gcp-service-account.json', 'db_password']) {
     await fs.writeFile(path.join(dir, name), 'token=abc');
     assert.equal((await s.tool('workspace_read', {workspace: dir, path: name})).error?.code, 'workspace_denied', name);
   }
+  await fs.writeFile(path.join(dir, '.env'), 'KEY=abc');
+  const aliases = process.platform === 'win32' ? ['.env ', '.env.', '.env::$DATA', '.ENV', 'x/../.env'] : ['x/../.env', './.env'];
+  for (const alias of aliases) assert.ok((await s.tool('workspace_read', {workspace: dir, path: alias})).error, `alias ${JSON.stringify(alias)} must not read .env`);
+  await fs.writeFile(path.join(dir, 'src', 'secretStore.js'), 'export const store = new Map();\n');
+  assert.match((await s.tool('workspace_read', {workspace: dir, path: 'src/secretStore.js'})).content, /new Map/, 'source files stay readable');
   const key = ['sk-', 'proj', 'A'.repeat(30)].join('');
   await fs.writeFile(path.join(dir, 'src', 'config.js'), `export const key = "${key}";\n`);
   const read = await s.tool('workspace_read', {workspace: dir, path: 'src/config.js'});
