@@ -72,6 +72,9 @@ test('patch paths are checked before anything runs', () => {
   for (const bad of ['--- a/.env\n+++ b/.env\n', '--- a/../x\n+++ b/../x\n', 'diff --git a/.git/config b/.git/config\n', '+++ b/C:/Windows/x\n', 'rename to secrets.json\n']) {
     assert.throws(() => patchedFiles(bad), /protected or out-of-tree/, bad);
   }
+  const symlink = 'diff --git a/link b/link\nnew file mode 120000\nindex 0000000..e69de29\n--- /dev/null\n+++ b/link\n@@ -0,0 +1 @@\n+/etc/passwd\n';
+  assert.throws(() => patchedFiles(symlink), /symbolic link or submodule/);
+  assert.throws(() => patchedFiles('diff --git a/sub b/sub\nnew file mode 160000\n--- /dev/null\n+++ b/sub\n'), /symbolic link or submodule/);
 });
 
 test('patch_validate runs an allowlisted command on a copy and never touches the original tree', {skip: !hasGit}, async t => {

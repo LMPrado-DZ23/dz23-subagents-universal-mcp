@@ -17,6 +17,10 @@ const GIT_LONG = cfg => ({...cfg, workspaceCommandTimeoutMs: Math.max(cfg.worksp
 export function patchedFiles(patch) {
   const files = new Set();
   for (const line of String(patch).split(/\r?\n/)) {
+    // Symlinks and submodules could point the copy at files outside it.
+    if (/^(?:new file|deleted file|old|new) mode (?:120000|160000)\b|^index [0-9a-f]+\.\.[0-9a-f]+ (?:120000|160000)\b/.test(line)) {
+      throw new ToolError('patch_denied', 'the patch creates or changes a symbolic link or submodule');
+    }
     let match = /^diff --git a\/(.+?) b\/(.+)$/.exec(line);
     const paths = match ? [match[1], match[2]] : [];
     match = /^(?:\+\+\+|---) (?:[ab]\/)?(.+?)(?:\t.*)?$/.exec(line);
@@ -56,7 +60,7 @@ function killTree(child) {
 const tail = (text, max) => maskSecrets(text.length > max ? `…${text.slice(-max)}` : text);
 
 function run(cfg, {command, work, home, timeoutMs}) {
-  const docker = cfg.sandboxMode === 'docker';
+  const docker = cfg.sandboxMode !== 'process';
   const name = `dz23-sandbox-${crypto.randomUUID()}`;
   const child = docker
     ? spawn('docker', ['run', '--rm', '--name', name, '--network', 'none', '--cpus', '2', '--memory', '2g', '--pids-limit', '512', '-v', `${work}:/work`, '-w', '/work', cfg.sandboxImage, 'sh', '-c', command],
@@ -106,7 +110,7 @@ export async function patchValidate(cfg, {workspace, patch, command, timeout_ms}
     if ((await runGit(long, work, ['apply', '--whitespace=nowarn', patchFile])).code !== 0) throw new ToolError('patch_rejected', 'the patch could not be applied');
     const timeoutMs = Math.min(timeout_ms || cfg.sandboxTimeoutMs || 300_000, cfg.sandboxTimeoutMs || 300_000);
     const result = await run(cfg, {command, work, home, timeoutMs});
-    return {mode: cfg.sandboxMode === 'docker' ? 'docker' : 'process', network: cfg.sandboxMode === 'docker' ? 'none' : 'not_isolated',
+    return {mode: cfg.sandboxMode === 'process' ? 'process' : 'docker', network: cfg.sandboxMode === 'process' ? 'not_isolated' : 'none',
       head: head.stdout.trim().slice(0, 40), files_changed: files, applied: true, command, passed: result.exit_code === 0 && !result.timed_out, ...result,
       original_workspace_modified: false};
   } finally {

@@ -8,7 +8,7 @@
     },
     {
       "path": ".env.example",
-      "sha256": "d8e22def0841d934bea8fbbb1b68d67f2d57dbd4dff25823201488da3d6ae576"
+      "sha256": "d44c3d02ebe05b0fdce95f8dc4481ada96103c20d4e00af88dbde4231826dcb6"
     },
     {
       "path": ".gitattributes",
@@ -36,7 +36,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "10e74a8743b6fc46d35e5ba158f04562f35143fb4c27bf342fcf9f1e42eb5ed6"
+      "sha256": "bf71ab08d0b4dba8b44d3edb4be0c3ab5cb08f5e0118cd487e3678e337f846dd"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -144,7 +144,7 @@
     },
     {
       "path": "docs/OPERATIONS.md",
-      "sha256": "d6215d7437acede18d9ed3e38273f6f90393878507f369707930981aba63b618"
+      "sha256": "8e0458d6527f9775546b0c67c39b71004ae25d96deed62d48fd11443df8d159c"
     },
     {
       "path": "docs/PROVIDER_ARCHITECTURE.md",
@@ -160,15 +160,15 @@
     },
     {
       "path": "docs/SECURITY_AND_SECRETS.md",
-      "sha256": "d20aa0f2809ec4a788a871601df6d2ac22334c43e03ec28ceed5f414b5302cec"
+      "sha256": "9420d342416c8864a60b47bc5251e64dce4c29f1fa25e4f86d7ceb672e2527bb"
     },
     {
       "path": "docs/TOOLS.md",
-      "sha256": "ab69b12c5f5208d68d2f1c5d9d7d1e48a36faecc36db8a22ce208ff1161206dc"
+      "sha256": "10c908922a2be25d0786ce175506d77d231953e58583d73569a714710dbab75b"
     },
     {
       "path": "docs/VALIDATION.md",
-      "sha256": "f665ebd9eb492efe5915108989d351533d40c96bfc6fc9a3693be777c657bdbc"
+      "sha256": "652fb713f5fe1290d92d3591f4005e7f66d930f5a458e7ab62887bdff01ada7f"
     },
     {
       "path": "package.json",
@@ -236,7 +236,7 @@
     },
     {
       "path": "src/config.js",
-      "sha256": "05bf4ddde6600faa0428f8dcbb85dad81bc108a213c50a3235f2120e43c27698"
+      "sha256": "c2d2a500890f9aa5a4a3ee79e66b29c9ac989f3130960474ff0d674da7152f65"
     },
     {
       "path": "src/consensus.js",
@@ -380,7 +380,7 @@
     },
     {
       "path": "src/sandbox.js",
-      "sha256": "cb07aa10747632155b18646143cdfb40dee48e173873bca07134190d23109017"
+      "sha256": "0318c528bf41a0d573371e58b7c7309cc2864640fbfb34f3566b0f4a1659a05d"
     },
     {
       "path": "src/schema.js",
@@ -472,7 +472,7 @@
     },
     {
       "path": "test/dashboard-sandbox-420.test.js",
-      "sha256": "9a7cbdb50f3b9d416a493c96f92c182e897258d3173474725b14b99ec368eeac"
+      "sha256": "1a81aacb21b4ce87a6e9daecf3976370a1a9f2526152d55706ab421ea1fa4d14"
     },
     {
       "path": "test/hardening-audit.test.js",

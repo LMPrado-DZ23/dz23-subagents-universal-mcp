@@ -400,10 +400,13 @@ sem chamar provedores.
    apaga a pasta temporária.
 
 O repositório original nunca é alterado e nada é commitado ou enviado. Uma validação por vez
-(`sandbox_busy`). **No modo `process` a rede não é isolada** e o comando roda com o usuário do servidor:
-permita só comandos de teste do próprio projeto. `DZ23_SANDBOX_MODE=docker` roda em
-`docker run --network none` com limites de CPU, memória e processos (`DZ23_SANDBOX_IMAGE`, padrão
-`node:22-bookworm-slim`); dependências precisam estar no repositório ou na imagem.
+(`sandbox_busy`). Diffs que criam ou alteram symlinks ou submódulos são recusados.
+
+**O diff é código escrito pelo cliente**: o comando de teste executa esse código. Por isso o modo padrão é
+`docker` (`docker run --network none` com limites de CPU, memória e processos; imagem `DZ23_SANDBOX_IMAGE`,
+padrão `node:22-bookworm-slim`; dependências precisam estar no repositório ou na imagem). O modo `process`
+só é usado com `DZ23_SANDBOX_MODE=process` explícito: ele roda o código do diff **com o seu usuário, acesso à
+rede e aos seus arquivos**, e só é aceitável quando você confia no cliente e no modelo que geram os diffs.
 
 ### Painel
 

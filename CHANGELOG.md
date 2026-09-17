@@ -28,7 +28,8 @@ fica ligada por padrão.
   - diff aplicado num clone temporário em `HEAD`;
   - só comandos permitidos, com ambiente mínimo, timeout e encerramento da árvore de processos;
   - caminhos protegidos recusados;
-  - modo `docker` com `--network none`.
+  - modo `docker` (padrão) com `--network none`; `process` só com `DZ23_SANDBOX_MODE=process` explícito;
+  - diffs com symlinks ou submódulos recusados.
 - **Escopo novo:** `sandbox:execute`.
 - **CI:** job `MCP Inspector (official client)` em Linux e Windows. Valida `tools/list`, `tools/call`,
   `resources/list`, `resources/templates/list`, `resources/read`, `prompts/list` e `prompts/get` com

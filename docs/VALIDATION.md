@@ -29,6 +29,10 @@ ferramentas (`mission_list`, `playbook_get`) para clientes que só expõem tools
 | `npm run check:inspector` | 7/7 |
 | Smoke com processo real (stdio + comando `dashboard`) | 13/13: 27 ferramentas com workspace e sandbox ligados, `routing_explain`, `cost_estimate`, plano inválido recusado, `mission_list`, `playbook_get`, `patch_validate` aprovando a correção numa cópia com a árvore original intacta, comando fora da lista recusado, página do painel com CSP, API do painel recusando sem token e respondendo com token |
 
+### Revisão independente de segurança
+
+Uma revisão adversarial pelo próprio DZ23 MCP (modelo gratuito) do sandbox e do painel apontou que o diff é código executado pelo comando de teste. Consequências aplicadas antes da publicação: o modo padrão passou a ser `docker` (`--network none`), o modo `process` exige `DZ23_SANDBOX_MODE=process` explícito e diffs com symlinks ou submódulos são recusados. Nenhum problema foi encontrado no painel.
+
 ### Não validado
 
 - Modo Docker do sandbox nesta máquina (daemon não iniciou; no WSL a imagem não pôde ser baixada). O teste roda

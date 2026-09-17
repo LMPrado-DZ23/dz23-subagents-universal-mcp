@@ -188,7 +188,8 @@ export function config(env = process.env) {
     adaptiveRouting: bool('DZ23_ADAPTIVE_ROUTING', true),
     sandboxEnabled: bool('DZ23_SANDBOX_ENABLED', false),
     sandboxCommands: String(env.DZ23_SANDBOX_COMMANDS || '').split(';;').map(item => item.trim()).filter(Boolean).slice(0, 20),
-    sandboxMode: env.DZ23_SANDBOX_MODE === 'docker' ? 'docker' : 'process',
+    // The patch is code written by the client; running it outside a container must be an explicit choice.
+    sandboxMode: env.DZ23_SANDBOX_MODE === 'process' ? 'process' : 'docker',
     sandboxImage: env.DZ23_SANDBOX_IMAGE || 'node:22-bookworm-slim',
     sandboxTimeoutMs: int('DZ23_SANDBOX_TIMEOUT_MS', 300_000, 5000, 1_800_000),
     sandboxMaxOutputChars: int('DZ23_SANDBOX_MAX_OUTPUT_CHARS', 65_536, 1024, 1_048_576),

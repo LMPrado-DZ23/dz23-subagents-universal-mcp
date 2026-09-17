@@ -104,9 +104,10 @@ Chamadas canceladas ou com timeout depois de enviadas ao provider entram no orç
 - `patch_validate` fica desligado por padrão. O cliente não escolhe comandos: só um dos definidos pelo operador em
   `DZ23_SANDBOX_COMMANDS`, por igualdade exata. O diff é aplicado num clone temporário; caminhos protegidos,
   absolutos, `..` e `.git` são recusados antes de copiar. O comando recebe ambiente mínimo, sem as chaves de
-  provedor do servidor. **No modo `process` não há isolamento de rede nem de sistema de arquivos além da pasta de
-  trabalho**: um teste malicioso do próprio repositório poderia ler arquivos do usuário. Para código não confiável use
-  o modo `docker` (`--network none`, limites de CPU, memória e processos) ou não ligue o sandbox.
+  provedor do servidor. O diff é código escrito pelo cliente e o comando de teste o executa: por isso o padrão é
+  `docker` (`--network none`, limites de CPU, memória e processos), e symlinks e submódulos no diff são recusados.
+  **O modo `process` (só com `DZ23_SANDBOX_MODE=process`) não tem isolamento de rede nem de sistema de arquivos**:
+  o código do diff roda com o usuário do servidor.
 
 ## Outros cuidados
 

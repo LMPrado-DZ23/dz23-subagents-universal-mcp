@@ -356,7 +356,7 @@ foi de fato feito).
 | `DZ23_ADAPTIVE_ROUTING` | `true` | — | Reordena modelos dentro da mesma faixa de custo pelo histórico de sucesso, latência e cota (só com `free-first`) |
 | `DZ23_SANDBOX_ENABLED` | `false` | — | Liga `patch_validate` (exige também `DZ23_WORKSPACE_ROOTS` e `DZ23_SANDBOX_COMMANDS`) |
 | `DZ23_SANDBOX_COMMANDS` | vazio | até 20 | Comandos permitidos, separados por `;;` (ex.: `npm test;;npm run lint`); o cliente só escolhe um deles |
-| `DZ23_SANDBOX_MODE` | `process` | `process`, `docker` | `docker` roda com `--network none`; `process` não isola a rede |
+| `DZ23_SANDBOX_MODE` | `docker` | `docker`, `process` | `docker` roda com `--network none`; `process` executa o código do diff com seu usuário e rede (só com valor explícito) |
 | `DZ23_SANDBOX_IMAGE` | `node:22-bookworm-slim` | — | Imagem do modo `docker` |
 | `DZ23_SANDBOX_TIMEOUT_MS` | `300000` | 5 000–1 800 000 | Tempo máximo do comando de validação |
 | `DZ23_SANDBOX_MAX_OUTPUT_CHARS` | `65536` | 1 024–1 048 576 | Final de stdout/stderr devolvido |
@@ -380,8 +380,8 @@ foi de fato feito).
   comando (Ctrl+C). É somente leitura e não precisa de `DZ23_ALLOW_HTTP`.
 - **Roteamento aprendido:** `<estado>/providers/routing-stats.json` pode ser apagado com os harnesses fechados
   para recomeçar o aprendizado; `DZ23_ADAPTIVE_ROUTING=false` volta à ordem fixa da 4.1.0.
-- **Sandbox:** ligue só para repositórios seus e com comandos de teste conhecidos. No modo `process` o comando
-  roda com seu usuário e acesso à rede; use `DZ23_SANDBOX_MODE=docker` quando o Docker estiver disponível.
+- **Sandbox:** o padrão é `docker` e exige o Docker em execução. `DZ23_SANDBOX_MODE=process` roda o código do diff
+  com seu usuário e acesso à rede; use só com clientes e modelos em que você confia.
   Projetos que precisam de `npm install` antes dos testes precisam das dependências na imagem Docker ou de um
   comando permitido que as instale.
 
