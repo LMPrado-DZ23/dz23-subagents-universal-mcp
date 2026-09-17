@@ -6,16 +6,17 @@
 
 Self-hosted MCP router for delegating text/code tasks to AI models, running parallel
 specialists and keeping explicit, versioned mission memory that another harness can resume.
-Version 4.0.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
+Version 4.1.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
 The linked guides are in Portuguese.
 
 Workers return text/code. They do not execute shell commands, edit repositories, use browsers
 or run tests; the host harness owns those operations. Handoff works through persisted state,
 not hidden model thoughts or unrecorded client conversations.
 
-## What 4.0.0 provides
+## What 4.1.0 provides
 
-- **MCP**: 11 tools, protocol revisions 2025-11-25 and 2025-06-18, enforced closed schemas with
+- **Project and missions (4.1.0)**: read-only access to allowed folders (`DZ23_WORKSPACE_ROOTS`) with credential files blocked and secrets masked, hardened read-only Git, project context attached to prompts, asynchronous missions, leases between harnesses, MCP resources and prompts, hash-chained audit log.
+- **MCP**: the 11 tools of 4.0.0 plus 11 new ones, protocol revisions 2025-11-25 and 2025-06-18, enforced closed schemas with
   bounded inputs, standard JSON-RPC errors, tool execution errors with `request_id`. stdio runs up to
   `DZ23_STDIO_MAX_INFLIGHT` requests concurrently and honors `notifications/cancelled`.
 - **HTTP (opt-in)**: bearer token from env or file (required even on loopback), optional per-token

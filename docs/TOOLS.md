@@ -1,4 +1,4 @@
-# As onze ferramentas
+# Ferramentas
 
 Todas as ferramentas publicam `inputSchema` fechado (`additionalProperties: false`) e o
 servidor aplica esse mesmo schema antes de executar qualquer coisa, em stdio, HTTP `/mcp`
@@ -200,17 +200,131 @@ reproduzem o que o catálogo do provider declara e ficam `unknown` quando não h
 
 `config/agents.example.json` é apenas referência humana; o runtime não o carrega.
 
+## Ferramentas adicionadas na 4.1.0
 
-## Adições da 4.1.0
+A 4.1.0 mantém as onze ferramentas e o contrato da 4.0.0 e acrescenta onze. As de workspace só
+aparecem em `tools/list` (e só podem ser chamadas) quando `DZ23_WORKSPACE_ROOTS` está configurada.
 
-A 4.1 adiciona um Tool Gateway declarativo: cada adapter possui escopos, classe de custo, indicação de cobrança, prazo, abort, orçamento, redaction, evento de auditoria e origem de habilitação. O registro não substitui a política única do roteador.
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
+| --- | --- | --- | --- | --- |
+| `workspace_read` | `workspace`, `path` | Lista uma pasta ou lê um arquivo UTF-8 limitado dentro das raízes permitidas | `workspace:read` | local |
+| `workspace_search` | `workspace`, `query`, `regex`, `max_results` | Busca texto ou regex em todos os arquivos permitidos (até `DZ23_WORKSPACE_MAX_FILES`) | `workspace:read` | local |
+| `git_readonly` | `workspace`, `operation` (`status`, `diff`, `log`, `show`) | Git somente leitura, blindado contra configuração do repositório | `git:read` | local |
+| `mission_start` | `goal`, IDs, `roles`, `acceptance_criteria`, `routing_strategy`, `max_iterations`, `lease_token` | Inicia um loop de missão em segundo plano e devolve `job_id` | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** |
+| `mission_status_job` | `job_id` (+ `project_id`, `mission_id` após reinício) | Estado do job; `orphaned` quando o processo que o executava parou | `mission:control` + `memory:read` | local |
+| `mission_pause` | `job_id` | Pausa ao fim da iteração atual | `mission:control` + `memory:write` | local |
+| `mission_resume` | `job_id` | Novo `job_id` com o mesmo objetivo, papéis, critérios e iterações restantes | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** |
+| `mission_cancel` | `job_id` | Cancela job em execução ou pausado; job terminado mantém o status final | `mission:control` + `memory:write` | local |
+| `mission_claim` | IDs, `identity`, `lease_ms`, `lease_token` | Trava a missão para um harness, com expiração; renovação exige o token | `mission:lease` + `memory:write` | local |
+| `mission_release` | IDs, `token` | Libera a trava | `mission:lease` + `memory:write` | local |
+| `handoff_export` | IDs | `{markdown}` com objetivo, estado, critérios, decisões, testes e próximos passos | `memory:read` | local |
 
-Novas ferramentas: `workspace_read`, `workspace_search`, `git_readonly`, `mission_start`, `mission_status_job`, `mission_pause`, `mission_resume`, `mission_cancel`, `mission_claim`, `mission_release` e `handoff_export`. O contexto de projeto em `delegate`, `consensus` e `swarm_run` é nonce-marked e tratado como dado não confiável.
+### Workspace e Git
 
-`resources/list`, `resources/read`, `prompts/list` e `prompts/get` são recursos MCP somente leitura. Tasks oficiais ainda não são anunciadas, conforme o roadmap; jobs usam as ferramentas `mission_*` até a validação protocolar específica.
+- Só pastas abaixo de `DZ23_WORKSPACE_ROOTS` (caminho real, depois de resolver links e junctions;
+  sem diferenciar maiúsculas no Windows). Caminhos UNC e absolutos em `path` são recusados.
+- Nomes protegidos nunca são lidos, listados ou buscados: `.env*`, `*.env`, `.npmrc`, `.yarnrc`,
+  `.pypirc`, `.netrc`, `.git-credentials`, `.htpasswd`, `.pgpass`, `.git`, `.ssh`, `.gnupg`, `.aws`,
+  `.azure`, `.kube`, `.docker`, chaves `id_*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`,
+  `*.keystore`, `*.kdbx`, `*.tfstate`, `credentials*`, `secrets*` e arquivos de configuração com
+  secret/password/credential/api_key/access_token/service_account no nome.
+- Segredos com formato conhecido (chaves `sk-`, `gsk_`, `AIza`, `AKIA`, tokens do GitHub e Slack, JWT,
+  chaves privadas PEM, atribuições `*_API_KEY=`/`*_TOKEN=`) são mascarados no conteúdo lido, na busca
+  e na saída do Git.
+- `workspace_search` com `regex: true` roda a expressão num worker isolado, com limite de 1 s por
+  arquivo: uma expressão catastrófica falha com `regex_timeout` sem travar o servidor. `node_modules`
+  é ignorado.
+- `git_readonly` roda o Git com ambiente mínimo (nenhuma chave do processo), sem pager, sem
+  fsmonitor, sem hooks, sem diff externo nem textconv, e sem locks opcionais. Se a configuração local
+  do repositório define algo que executa programas (`core.fsmonitor`, `core.pager`, `filter.*`,
+  `diff.*.textconv`, `diff.external`, `credential.helper`, includes...), a chamada falha com
+  `git_config_unsafe` e lista as chaves. Repositório que começa acima da raiz permitida:
+  `git_repository_outside_root`.
 
-`output_schema` valida JSON retornado; `detail` e `max_response_chars` limitam a resposta; `idempotency_key` evita cobrança duplicada em repetição; `cache=true` só funciona com `DZ23_RESPONSE_CACHE_TTL_MS` maior que zero. Privacy `auto` mascara segredos e PII brasileira antes do contexto ser enviado.
+### Contexto de projeto em `delegate`, `consensus` e `swarm_run`
 
-Leases são persistidos em `state/leases` e retornam `mission_busy` para outro harness. O audit log append-only em `state/audit/events.jsonl` encadeia hashes SHA-256 e grava somente metadados redigidos.
+`context: {files, search, git_diff}` com `workspace` anexa evidência ao prompt dentro de
+`<dz23-untrusted-context nonce="...">` … `</dz23-untrusted-context nonce="...">`; o mesmo nonce nos
+dois marcadores impede que o conteúdo feche o bloco e continue como instrução. Arquivos com frases
+típicas de prompt injection recebem `warning="possible_prompt_injection"`. O texto é limitado a
+`DZ23_MAX_CONTEXT_CHARS`.
 
-O sandbox de patch **não faz parte da 4.1** e permanece reservado ao PR 8/versão 5.0, desligado e não exposto nesta etapa.
+`privacy`:
+
+- `auto` (padrão): mascara segredos e dados pessoais válidos (CPF e CNPJ com dígito verificador,
+  cartão com Luhn, e-mail, telefone brasileiro formatado). Números comuns em código (portas,
+  timestamps, ids) não são alterados.
+- `local_only`: igual a `auto` e, além disso, roteia **somente** para alvos locais em endpoint privado;
+  sem alvo local o erro é `no_local_target`, antes de qualquer chamada.
+- `allow_cloud`: mantém dados pessoais; segredos continuam mascarados.
+
+### Formato da resposta, idempotência e cache
+
+- `detail: brief` limita o texto a 2 000 caracteres; `normal` e `full` mantêm o comportamento da
+  4.0.0 (sem corte). `max_response_chars` define um limite explícito. Quando há corte, a resposta traz
+  `truncated: true`.
+- `output_schema` aceita o subconjunto `type`, `required`, `properties`, `items` e `enum`
+  (profundidade até 32). Um bloco ```json único é aceito. `delegate` tenta de novo uma vez pedindo só
+  JSON e falha com `response_invalid`; `consensus` e `swarm_run` não falham: cada resposta (e a
+  integração) recebe `structured_output` ou `schema_error`, e a síntese é preservada.
+- `idempotency_key` vale 24 h no processo, por identidade e ferramenta: a mesma chave com os mesmos
+  argumentos devolve o primeiro resultado (uma chamada ainda em andamento é aguardada, não repetida);
+  argumentos diferentes falham com `idempotency_conflict`.
+- `cache: true` (só em `delegate`) reutiliza uma resposta idêntica da mesma identidade quando
+  `DZ23_RESPONSE_CACHE_TTL_MS` > 0; a resposta informa `cache_status` (`hit`, `miss` ou `disabled`).
+  Um acerto de cache não chama provider nem grava nova resposta na missão.
+
+### Missões assíncronas
+
+Cada iteração executa `swarm_run` com o objetivo original e, a partir da segunda, o texto da integração
+anterior como diagnóstico (entre marcadores com nonce). Duas integrações quase iguais seguidas trocam a
+estratégia de roteamento; a terceira encerra com `failed_safe` / `stagnation`. O progresso fica em
+`loop_state` da missão; `status`, `next_action` e `goal` continuam sendo do harness.
+
+Estados: `queued`, `running`, `paused`, `completed`, `awaiting_acceptance`, `failed_safe`, `failed`,
+`cancelled`, `deadline_exceeded`, `resumed` e, após reinício, `orphaned`. O job termina `completed` só
+quando o harness registrou testes aprovados novos (e nenhum reprovado) com `memory_checkpoint` durante
+o job; sem isso, `awaiting_acceptance`. No máximo `DZ23_MAX_MISSION_JOBS` jobs rodam ao mesmo tempo
+(`mission_jobs_busy`), e cada job respeita `DZ23_MISSION_DEADLINE_MS`. Jobs existem só no processo
+que os iniciou.
+
+### Travas entre harnesses
+
+Enquanto uma trava de `mission_claim` estiver válida, `memory_checkpoint`, `delegate`, `consensus`,
+`swarm_run` e `mission_start` nessa missão exigem `lease_token`; sem ele, `mission_busy`, antes de
+qualquer chamada a provider. A reivindicação é atômica (trava de diretório), a renovação exige o
+token e a expiração libera a missão sozinha. Travas coordenam harnesses que cooperam; não são
+autenticação.
+
+### Resources e prompts MCP
+
+- `resources/list`: missões existentes como `dz23://mission/<project_id>/<mission_id>`, 100 por página
+  (`nextCursor`). `resources/templates/list`: o modelo `dz23://mission/{project_id}/{mission_id}`.
+  `resources/read`: estado compacto da missão. Recurso inexistente: JSON-RPC `-32002`. Com tokens de
+  escopo, exigem `memory:read`.
+- `prompts/list` e `prompts/get`: `audit_project` (`goal`, `workspace` opcional), `fix_bug` (`bug`) e
+  `review_pull_request` (`change`). Argumento ausente, desconhecido ou não textual: `-32602`.
+- Tasks do MCP ainda não são anunciadas; jobs longos usam `mission_start`/`mission_status_job`.
+
+### Log de auditoria
+
+Cada chamada de ferramenta grava metadados (ferramenta, status, código de erro, identidade, duração,
+`request_id`; nunca prompts, respostas ou chaves) em `<estado>/audit/events.jsonl`, com hash SHA-256
+encadeado. As gravações são serializadas no processo e travadas entre processos; o arquivo gira aos
+10 MB. O encadeamento detecta edição de linhas, mas quem controla o diretório de estado pode reescrever
+a cadeia inteira.
+
+### Erros novos
+
+| Código | Quando | REST |
+| --- | --- | --- |
+| `workspace_denied` / `workspace_not_found` / `workspace_limit` | Fora das raízes, protegido, inexistente ou acima do limite | 403 / 404 / 400 |
+| `regex_timeout` | Regex demorou mais de 1 s num arquivo | 400 |
+| `git_config_unsafe` / `git_repository_outside_root` / `git_not_repository` | Configuração do repositório executa programas / repositório fora da raiz / sem repositório | 400 |
+| `no_local_target` | `privacy: local_only` sem alvo local elegível | 503 |
+| `response_invalid` | Resposta de `delegate` fora de `output_schema` após nova tentativa | 502 |
+| `idempotency_conflict` | Mesma `idempotency_key` com argumentos diferentes | 409 |
+| `mission_busy` | Missão travada por outro harness | 409 |
+| `mission_jobs_busy` / `job_not_found` / `job_not_paused` | Limite de jobs / job desconhecido / retomada de job não pausado | 400 |
+
+As ferramentas novas existem só em MCP (stdio e `/mcp`); a API REST continua com as rotas da 4.0.0.

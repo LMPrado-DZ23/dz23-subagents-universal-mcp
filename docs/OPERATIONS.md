@@ -342,6 +342,28 @@ foi de fato feito).
 | `DZ23_PRIVATE_HOSTS` | vazio | — | Hostnames tratados como rede privada (além de IPs privados, `localhost` e `host.docker.internal`) |
 | `DZ23_ALLOW_GENERIC_CREDENTIALS` | `false` | — | Aceita `GITHUB_TOKEN`, `HF_TOKEN`, `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_AUTH_TOKEN` sem citar o provider na rotação |
 | `DZ23_ALLOW_UNAUTHENTICATED_LOCAL_HTTP` | `false` | — | Permite `--http` em loopback sem token (apenas teste local) |
+| `DZ23_WORKSPACE_ROOTS` | vazio | — | Pastas (separadas por vírgula) que `workspace_read`, `workspace_search`, `git_readonly` e `context` podem ler; vazio desliga essas ferramentas |
+| `DZ23_WORKSPACE_MAX_FILE_BYTES` | `262144` | 1 024–5 242 880 | Tamanho máximo de um arquivo lido ou buscado |
+| `DZ23_WORKSPACE_MAX_ENTRIES` | `500` | 1–5 000 | Itens por listagem de pasta (`truncated: true` acima disso) |
+| `DZ23_WORKSPACE_MAX_FILES` | `2000` | 1–20 000 | Arquivos examinados por busca |
+| `DZ23_WORKSPACE_MAX_LINE_CHARS` | `4000` | 100–32 000 | Caracteres por linha em resultados de busca |
+| `DZ23_WORKSPACE_MAX_OUTPUT_CHARS` | `262144` | 1 024–2 097 152 | Saída máxima de `git_readonly` |
+| `DZ23_WORKSPACE_COMMAND_TIMEOUT_MS` | `10000` | 1 000–120 000 | Tempo máximo de cada comando Git |
+| `DZ23_RESPONSE_CACHE_TTL_MS` | `0` | 0–86 400 000 | Validade do cache de `delegate` com `cache: true`; 0 desliga |
+| `DZ23_MAX_MISSION_JOBS` | `2` | 1–16 | Jobs de `mission_start` rodando ao mesmo tempo |
+| `DZ23_MISSION_DEADLINE_MS` | `3600000` | 10 000–86 400 000 | Prazo total de um job de missão (`deadline_exceeded`) |
+
+## Missões assíncronas, travas e auditoria (4.1.0)
+
+- Jobs de `mission_start` rodam dentro do processo do servidor. Encerrar o processo (fechar o harness,
+  SIGTERM) interrompe o job; `mission_status_job` com `project_id` e `mission_id` mostra `orphaned`.
+  Inicie de novo com `mission_start`.
+- Travas de missão ficam em `<estado>/leases/<projeto>/<missão>.json` e expiram sozinhas
+  (`lease_ms`, até 1 h). Para destravar uma missão cujo harness caiu, espere a expiração.
+- O log de auditoria fica em `<estado>/audit/events.jsonl` (gira aos 10 MB). Não contém prompts, respostas
+  nem chaves. Inclua `audit/` no backup do diretório de estado.
+- Com `DZ23_WORKSPACE_ROOTS`, aponte só para pastas de projeto, nunca para a pasta de usuário inteira: arquivos
+  de credencial conhecidos são bloqueados, mas dados sensíveis sem padrão reconhecível seriam legíveis.
 
 ## Docker
 
@@ -352,18 +374,3 @@ healthcheck autenticado e hostname fixo, para que um container recriado reconhe�
 (com apenas tokens com escopo, aponte `DZ23_HEALTHCHECK_TOKEN_FILE` para um
 deles; `/healthz` não exige escopo). A porta é publicada só em `127.0.0.1`. Não use `docker compose down -v`
 em atualizações: isso apaga a memória. Docker não foi executado no ambiente desta entrega.
-
-
-## Adições da 4.1.0
-
-A 4.1 adiciona um Tool Gateway declarativo: cada adapter possui escopos, classe de custo, indicação de cobrança, prazo, abort, orçamento, redaction, evento de auditoria e origem de habilitação. O registro não substitui a política única do roteador.
-
-Novas ferramentas: `workspace_read`, `workspace_search`, `git_readonly`, `mission_start`, `mission_status_job`, `mission_pause`, `mission_resume`, `mission_cancel`, `mission_claim`, `mission_release` e `handoff_export`. O contexto de projeto em `delegate`, `consensus` e `swarm_run` é nonce-marked e tratado como dado não confiável.
-
-`resources/list`, `resources/read`, `prompts/list` e `prompts/get` são recursos MCP somente leitura. Tasks oficiais ainda não são anunciadas, conforme o roadmap; jobs usam as ferramentas `mission_*` até a validação protocolar específica.
-
-`output_schema` valida JSON retornado; `detail` e `max_response_chars` limitam a resposta; `idempotency_key` evita cobrança duplicada em repetição; `cache=true` só funciona com `DZ23_RESPONSE_CACHE_TTL_MS` maior que zero. Privacy `auto` mascara segredos e PII brasileira antes do contexto ser enviado.
-
-Leases são persistidos em `state/leases` e retornam `mission_busy` para outro harness. O audit log append-only em `state/audit/events.jsonl` encadeia hashes SHA-256 e grava somente metadados redigidos.
-
-O sandbox de patch **não faz parte da 4.1** e permanece reservado ao PR 8/versão 5.0, desligado e não exposto nesta etapa.

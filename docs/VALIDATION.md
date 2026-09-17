@@ -1,5 +1,51 @@
 # Validação
 
+## v4.1.0 — auditoria da entrega externa e correções
+
+Data: 2026-09-17. Branch `feat/4.1.0` a partir da tag `v4.0.0`. A implementação inicial veio de um
+agente externo (zip `dz23-subagents-universal-mcp-4.1.0`), registrada sem alterações no commit
+`import: Manus 4.1.0 delivery as received`. Nenhum provider real foi chamado: testes e sondas usam
+providers falsos locais.
+
+### Processo
+
+1. A entrega passava nos gates do projeto (`npm run check`, 219 testes, `check:release`,
+   `check:public`), mas a leitura do código e sondas de comportamento pelo servidor MCP mostraram
+   defeitos que os testes da entrega não cobriam.
+2. Cada defeito virou um teste em `test/audit-410-tools.test.js` ou `test/audit-410-missions.test.js`.
+   Os 18 testes foram executados contra a entrega recebida e **todos falharam**, pelos motivos
+   esperados. Destaques:
+   - repositório com `core.fsmonitor` apontando para um script: o script foi executado por
+     `git_readonly`;
+   - `delegate` devolveu 12 000 de 20 000 caracteres sem que o cliente pedisse;
+   - `.npmrc` foi lido;
+   - `timeoutMs = 12345678` virou `[PHONE_REDACTED]`;
+   - evidência de teste anterior ao job concluiu a missão;
+   - `mission_cancel` transformou um job terminado em `cancelled`;
+   - seis reivindicações simultâneas de trava não garantiam vencedor único.
+3. Correções no commit `fix: audit of the 4.1.0 delivery` (lista completa no CHANGELOG). Depois delas
+   os 18 testes passam, junto com os testes da entrega.
+
+### Gates
+
+| Comando | Resultado observado |
+| --- | --- |
+| `npm run check` | 87 arquivos JavaScript, lint com 0 problemas |
+| `node --test` (Windows 11, Node 24) | 238 aprovados, 0 falhas, em duas execuções seguidas |
+| `node --test` (Linux no WSL2, Node 22) | 237 aprovados, 0 falhas, em duas execuções; 1 ignorado de propósito (sistema de arquivos sem diferença de maiúsculas) |
+| `npm run check:release` | PASS, versão 4.1.0, nenhum padrão de segredo |
+| `npm run check:public` | PASS |
+| Smoke com processo real (stdio, sem provider) | 13/13: 22 ferramentas com `DZ23_WORKSPACE_ROOTS`, leitura permitida e `.env` recusado, busca, resources, prompt, trava com `mission_busy`, handoff e log de auditoria sem chaves |
+| Smoke da 4.0.0 no mesmo processo | 14/15; a única diferença é a contagem de ferramentas, que agora inclui as novas (esperado) |
+
+### Não validado
+
+- MCP Inspector e tasks do MCP (não anunciadas).
+- Clientes reais (Claude Code, Codex) usando resources e prompts.
+- Providers reais, Ollama/LM Studio/vLLM, OmniRoute.
+- macOS; `git_readonly` com Git LFS e repositórios muito grandes.
+- Detecção de dados pessoais além dos formatos listados em `docs/TOOLS.md` (é heurística, não DLP).
+
 ## v4.0.0 — política de custo, failover, cancelamento e stdio concorrente
 
 Data: 2026-09-16. Ambiente executado: Windows 11 com Node.js 24. Branch `fix/v3.1.0-hardening` (a
@@ -295,13 +341,3 @@ observam chamadas simultâneas, sem depender de janelas de 30/40 ms. Mutações 
 (limite global de uma chamada, limite por alvo desabilitado, todos os workers no primeiro
 alvo) foram detectadas pelos testes. O pacote extraído foi retestado em pasta com espaços,
 com 27 testes aprovados, dry-run do publicador e smoke stdio real.
-
-## 4.1.0 — validação desta etapa
-
-Data: 2026-09-17. Ambiente: Ubuntu 24.04, Node.js 22. A execução final observada foi `npm run check` e `npm test`: 218 testes aprovados, 0 falhas e 1 teste ignorado por depender de filesystem case-insensitive. Foram cobertos workspace seguro, contexto nonce-marked, redaction de segredo/PII, prompt-injection warning, resources/prompts, Tool Gateway, leases e audit log encadeado.
-
-A auditoria adicional verificou que o audit log de runtime é ignorado pelo release e que o sandbox de patch não foi exposto nesta versão. Nenhum provider real foi chamado durante os testes desta etapa.
-
-### Não validado
-
-Windows/Node 22 e Node 24 em CI, MCP Inspector, tasks MCP oficiais, providers reais, endpoints locais Ollama/LM Studio/vLLM, OmniRoute, Windows Credential Manager, webhook, OTLP, upgrade dry-run, fake-provider de caos e sandbox de patch da versão 5.0.

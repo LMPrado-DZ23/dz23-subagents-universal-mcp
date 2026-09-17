@@ -47,7 +47,8 @@ Claude / Codex / Hermes / cliente MCP
 
 | Área | Implementado nesta versão |
 | --- | --- |
-| MCP | 11 ferramentas; revisões 2025-11-25 e 2025-06-18; schemas executados; erros JSON-RPC padronizados |
+| MCP | 11 ferramentas da 4.0.0 + 11 novas; resources e prompts; revisões 2025-11-25 e 2025-06-18; schemas executados; erros JSON-RPC padronizados |
+| Projeto e missões | Leitura segura de pastas permitidas e Git somente leitura; contexto anexado com máscara de segredos; missões assíncronas; travas entre harnesses; log de auditoria |
 | Transporte | stdio; HTTP JSON opcional (desligado por padrão), sem SSE/sessões/OAuth |
 | Segurança HTTP | Token por variável ou arquivo, escopos por token, Host/Origin, rate limit e limites por processo |
 | Delegação | OpenAI-compatible e Anthropic Messages; retry limitado; failover; cooldown por tipo de erro |
