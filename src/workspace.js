@@ -136,7 +136,7 @@ export async function searchWorkspace(cfg, {workspace, query, regex = false, max
   return {workspace: target.root, query, results, files_scanned: scanned, ...(budget.remaining <= 0 ? {file_limit_reached: true} : {})};
 }
 
-function runGit(cfg, cwd, args) {
+export function runGit(cfg, cwd, args) {
   // Only what git needs to run; provider keys and tokens in this process never reach the child.
   const env = {GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', GIT_CONFIG_NOSYSTEM: '1', LC_ALL: 'C'};
   for (const name of ['PATH', 'Path', 'SystemRoot', 'SYSTEMROOT', 'HOME', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'TEMP', 'TMP']) if (process.env[name]) env[name] = process.env[name];
@@ -153,8 +153,8 @@ function runGit(cfg, cwd, args) {
   });
 }
 
-export async function gitReadonly(cfg, {workspace, operation = 'status'} = {}) {
-  if (!['status', 'diff', 'log', 'show'].includes(operation)) throw new ToolError('invalid_request', 'unsupported git readonly operation');
+/** Resolves a workspace inside the allowed roots whose repository starts inside the root and cannot run programs. */
+export async function safeRepository(cfg, workspace) {
   const target = await resolveWorkspace(cfg, workspace);
   const top = await runGit(cfg, target.real, ['rev-parse', '--show-toplevel']);
   if (top.code !== 0) throw new ToolError('git_not_repository', 'workspace is not inside a git repository');
@@ -164,6 +164,12 @@ export async function gitReadonly(cfg, {workspace, operation = 'status'} = {}) {
   const local = await runGit(cfg, target.real, ['config', '--local', '--includes', '--name-only', '--list']);
   const risky = local.stdout.split(/\r?\n/).filter(name => RISKY_GIT_CONFIG.test(name.trim()));
   if (risky.length) throw new ToolError('git_config_unsafe', 'repository configuration can execute programs; refusing to run git', {keys: [...new Set(risky)].slice(0, 20)});
+  return {...target, toplevel};
+}
+
+export async function gitReadonly(cfg, {workspace, operation = 'status'} = {}) {
+  if (!['status', 'diff', 'log', 'show'].includes(operation)) throw new ToolError('invalid_request', 'unsupported git readonly operation');
+  const target = await safeRepository(cfg, workspace);
   const args = {status: ['status', '--short'], diff: ['diff', '--no-ext-diff', '--no-textconv', '--'], log: ['log', '-n', '20', '--oneline'],
     show: ['show', '--stat', '--oneline', '--no-ext-diff', '--no-textconv', 'HEAD']}[operation];
   const out = await runGit(cfg, target.real, args);

@@ -47,17 +47,19 @@ const BASE_TOOL_POLICIES = {
   mission_list: {scopes: ['memory:read'], costClass: 'light', billable: false},
   playbook_get: {scopes: ['memory:read'], costClass: 'light', billable: false},
   routing_explain: {scopes: ['provider:discover'], costClass: 'light', billable: false},
-  cost_estimate: {scopes: ['provider:discover'], costClass: 'light', billable: false}
+  cost_estimate: {scopes: ['provider:discover'], costClass: 'light', billable: false},
+  patch_validate: {scopes: ['sandbox:execute'], costClass: 'expensive', billable: false}
 };
 const WORKSPACE_TOOLS = new Set(['workspace_read', 'workspace_search', 'git_readonly']);
 export const TOOL_POLICIES = Object.freeze(Object.fromEntries(Object.entries(BASE_TOOL_POLICIES).map(([name, policy]) => [name, Object.freeze({
-  ...policy, audit_event: `tool.${name}`, enabled_by: WORKSPACE_TOOLS.has(name) ? 'DZ23_WORKSPACE_ROOTS' : 'core'
+  ...policy, audit_event: `tool.${name}`, enabled_by: name === 'patch_validate' ? 'DZ23_SANDBOX_ENABLED' : WORKSPACE_TOOLS.has(name) ? 'DZ23_WORKSPACE_ROOTS' : 'core'
 })])));
 
 /** Whether the gateway exposes a tool under this configuration. */
 export function toolEnabled(name, cfg = {}) {
   const policy = TOOL_POLICIES[name];
   if (!policy) return false;
+  if (policy.enabled_by === 'DZ23_SANDBOX_ENABLED') return Boolean(cfg.sandboxEnabled && cfg.workspaceRoots?.length && cfg.sandboxCommands?.length);
   return policy.enabled_by === 'DZ23_WORKSPACE_ROOTS' ? Boolean(cfg.workspaceRoots?.length) : true;
 }
 
@@ -272,7 +274,12 @@ export function buildTools(limits = toolLimits()) {
       inputSchema: object({tool: {type: 'string', enum: ['delegate', 'consensus', 'swarm_run'], default: 'delegate'}, prompt: plain(limits.maxPromptChars, 'Prompt or goal to size.'),
         prompt_chars: {type: 'integer', minimum: 0, maximum: 1000000}, models: {type: 'integer', minimum: 2, maximum: 5, default: 3}, roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
         max_agents: {type: 'integer', minimum: 1, maximum: 7}, synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic'}, task_type: {type: 'string', enum: TASK_TYPES}}),
-      annotations: annotations('Estimate call cost', {readOnly: true, idempotent: true})}
+      annotations: annotations('Estimate call cost', {readOnly: true, idempotent: true})},
+    {name: 'patch_validate', title: 'Validate patch in sandbox',
+      description: 'Apply a unified diff to a throwaway copy of the repository at HEAD and run one allowlisted test command there (DZ23_SANDBOX_COMMANDS, exact match). The original working tree is never modified; nothing is committed or pushed. Process mode does not isolate the network; docker mode runs with --network none. Returns exit code, timeout flag and masked output tails.',
+      inputSchema: object({workspace: text(4096, 'Configured workspace root (git repository).'), patch: text(1_000_000, 'Unified diff (git diff format).'),
+        command: text(500, 'One command from DZ23_SANDBOX_COMMANDS.'), timeout_ms: {type: 'integer', minimum: 5000, maximum: 1800000}}, ['workspace', 'patch', 'command']),
+      annotations: annotations('Validate patch in sandbox', {openWorld: true})}
   ];
   for (const tool of tools) assertSupportedSchema(tool.inputSchema, tool.name);
   return tools;

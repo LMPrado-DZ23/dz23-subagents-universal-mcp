@@ -14,6 +14,7 @@ import {appendAudit} from './audit-log.js';
 import {parseStructured, structuredField, limitResult, limitText, withIdempotency, cacheKey, cacheGet, cacheSet, localOnlyRouter} from './tool-extensions.js';
 import {listResources, listResourceTemplates, readResource, listPrompts, getPrompt} from './mcp-resources.js';
 import {explainRouting, estimateCost, listMissionsTool, playbook} from './insight-tools.js';
+import {patchValidate} from './sandbox.js';
 
 const DATE_VERSION = /^\d{4}-\d{2}-\d{2}$/;
 const JSON_ONLY = '\n\nReturn ONLY JSON matching the requested schema, without markdown or commentary.';
@@ -205,7 +206,8 @@ function toolRunner(router, memory) {
     mission_list: args => listMissionsTool(memory, args),
     playbook_get: args => playbook(args),
     routing_explain: args => explainRouting(router, args),
-    cost_estimate: args => estimateCost(router, args)
+    cost_estimate: args => estimateCost(router, args),
+    patch_validate: args => patchValidate(router.cfg, args)
   };
 }
 
