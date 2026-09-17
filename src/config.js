@@ -184,6 +184,8 @@ export function config(env = process.env) {
     maxGoalChars: int('DZ23_MAX_GOAL_CHARS', 8000, 500, 64_000),
     responseCacheTtlMs: int('DZ23_RESPONSE_CACHE_TTL_MS', 0, 0, 86_400_000),
     maxMissionJobs: int('DZ23_MAX_MISSION_JOBS', 2, 1, 16),
+    missionParallelNodes: int('DZ23_MISSION_PARALLEL_NODES', 3, 1, 8),
+    adaptiveRouting: bool('DZ23_ADAPTIVE_ROUTING', true),
     missionDeadlineMs: int('DZ23_MISSION_DEADLINE_MS', 3_600_000, 10_000, 24 * 3_600_000),
     workspaceRoots: list(env, 'DZ23_WORKSPACE_ROOTS').map(expandHome).map(value => path.resolve(value)),
     workspaceMaxFileBytes: int('DZ23_WORKSPACE_MAX_FILE_BYTES', 256 * 1024, 1024, 5 * 1024 * 1024),
