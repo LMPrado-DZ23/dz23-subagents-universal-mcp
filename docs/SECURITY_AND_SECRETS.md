@@ -83,6 +83,20 @@ Chamadas canceladas ou com timeout depois de enviadas ao provider entram no orç
   Proteja o diretório de estado como o restante da memória; quem pode escrever nele pode tirar alvos
   de rotação por até uma hora.
 
+## Leitura de projeto, Git e dados pessoais (4.1.0)
+
+- `workspace_read`, `workspace_search`, `git_readonly` e `context` só existem com `DZ23_WORKSPACE_ROOTS`.
+  Arquivos de credencial conhecidos (`.env*`, `.npmrc`, `.git-credentials`, `.netrc`, chaves SSH e PEM,
+  `*.pfx`, `.aws`, `.kube`...) nunca são lidos, listados ou buscados, e segredos com formato conhecido são
+  mascarados em tudo o que essas ferramentas devolvem ou anexam ao prompt.
+- A configuração local de um repositório é tratada como não confiável: o Git roda sem pager, fsmonitor, hooks,
+  diff externo e textconv, com ambiente mínimo (sem as chaves do processo), e recusa repositórios cuja
+  configuração executa programas (`git_config_unsafe`).
+- `privacy: auto` mascara CPF/CNPJ/cartão válidos, e-mail e telefone formatado antes de enviar contexto; é uma
+  heurística, não um DLP. Para material sensível use `privacy: local_only`, que só roteia para modelos locais.
+- Travas de missão coordenam harnesses que cooperam; não são controle de acesso. O log de auditoria detecta
+  edição de linhas, mas quem controla o diretório de estado pode reescrevê-lo por inteiro.
+
 ## Outros cuidados
 
 - `ALIBABA_API_KEY`/`DZ23_ALIBABA_BASE_URL` são separados de OpenAI. Together aceita

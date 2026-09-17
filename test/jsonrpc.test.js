@@ -41,8 +41,10 @@ test('JSON-RPC envelope errors use standard codes and never guess an id', async 
   assert.deepEqual([nullId.response.id, nullId.response.error.code], [null, -32600]);
   const noVersion = await process({id: 7, method: 'ping'});
   assert.deepEqual([noVersion.response.id, noVersion.response.error.code], [7, -32600]);
-  const unknown = await process({jsonrpc: '2.0', id: 'abc', method: 'resources/list'});
+  const unknown = await process({jsonrpc: '2.0', id: 'abc', method: 'sampling/createMessage'});
   assert.deepEqual([unknown.response.id, unknown.response.error.code, unknown.response.error.message], ['abc', -32601, 'Method not found']);
+  const resources = await process({jsonrpc: '2.0', id: 'res', method: 'resources/list'});
+  assert.ok(Array.isArray(resources.response.result.resources));
   const badParams = await process({jsonrpc: '2.0', id: 3, method: 'tools/list', params: []});
   assert.equal(badParams.response.error.code, -32602);
 });
@@ -67,7 +69,7 @@ test('initialize negotiates supported revisions and rejects malformed versions',
   const latest = await init('2025-11-25');
   assert.equal(latest.result.protocolVersion, '2025-11-25');
   assert.equal(latest.result.serverInfo.version, JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version);
-  assert.deepEqual(latest.result.capabilities, {tools: {listChanged: false}});
+  assert.deepEqual(latest.result.capabilities, {tools: {listChanged: false}, resources: {subscribe: false, listChanged: false}, prompts: {listChanged: false}});
   assert.equal((await init('2024-11-05')).result.protocolVersion, '2025-11-25');
   const bad = await init('future-unsupported');
   assert.equal(bad.error.code, -32602);

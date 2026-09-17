@@ -20,7 +20,7 @@ export const SYNTHESIS_MODES = Object.freeze(['none', 'heuristic', 'model']);
 export const MISSION_STATUSES = Object.freeze(['active', 'partial', 'blocked', 'paused', 'done', 'completed', 'failed', 'cancelled']);
 export const CHECKPOINT_MERGE_MODES = Object.freeze(['append', 'replace']);
 
-export const SCOPES = Object.freeze(['memory:read', 'memory:write', 'delegate:execute', 'health:execute', 'provider:discover', 'admin:inventory']);
+export const SCOPES = Object.freeze(['memory:read', 'memory:write', 'delegate:execute', 'health:execute', 'provider:discover', 'admin:inventory', 'workspace:read', 'git:read', 'mission:control', 'mission:lease']);
 export const AUTH_MODES = Object.freeze(['single-user', 'scoped']);
 
 // Relative operational weight used by the HTTP rate limiter (overridable by env).

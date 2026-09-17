@@ -1,5 +1,86 @@
 # Changelog
 
+## 4.1.0 — 2026-09-17 — contexto de projeto seguro, missões assíncronas, travas entre harnesses e resources/prompts MCP
+
+Versão menor: as onze ferramentas da 4.0.0 mantêm contrato e respostas. Base entregue por um agente
+externo e auditada antes da publicação (ver `docs/VALIDATION.md`).
+
+### Novo
+
+- **Leitura de projeto** (`workspace_read`, `workspace_search`, `git_readonly`), habilitada só com
+  `DZ23_WORKSPACE_ROOTS`:
+  - caminhos reais, arquivos de credencial bloqueados e segredos mascarados na saída;
+  - regex isolada com limite de tempo;
+  - Git somente leitura, que recusa configuração do repositório capaz de executar programas.
+- **Contexto de projeto** em `delegate`, `consensus` e `swarm_run` (`context: {files, search, git_diff}`
+  + `workspace`):
+  - bloco não confiável com nonce nos dois marcadores e aviso de prompt injection;
+  - `privacy` `auto`, `local_only` (roteia só para alvos locais) ou `allow_cloud`.
+- **Formato de resposta:**
+  - `detail`, `max_response_chars` e `output_schema` (subconjunto de JSON Schema);
+  - `idempotency_key` por identidade e argumentos;
+  - cache opcional em `delegate` (`DZ23_RESPONSE_CACHE_TTL_MS`, `cache_status`).
+- **Missões assíncronas:** `mission_start`, `mission_status_job`, `mission_pause`, `mission_resume` e
+  `mission_cancel`.
+  - O diagnóstico de cada iteração alimenta a próxima.
+  - A estagnação é medida por similaridade.
+  - O job só termina `completed` com testes aprovados registrados pelo harness durante o job.
+  - Limites: `DZ23_MAX_MISSION_JOBS` e `DZ23_MISSION_DEADLINE_MS`.
+  - Após reinício, o job aparece como `orphaned`.
+- **Travas entre harnesses:** `mission_claim` e `mission_release`, com reivindicação atômica e renovação
+  pelo token. A trava é exigida por `memory_checkpoint`, `delegate`, `consensus`, `swarm_run` e
+  `mission_start` (`mission_busy`).
+- **`handoff_export`:** briefing em Markdown.
+- **MCP:**
+  - `resources/list` (paginado), `resources/templates/list` e `resources/read` (erro `-32002`,
+    escopo `memory:read`);
+  - `prompts/list` e `prompts/get` com argumentos validados;
+  - capabilities `resources` e `prompts` no `initialize`.
+- **Log de auditoria** com hash encadeado em `<estado>/audit/events.jsonl`: serializado, travado entre
+  processos e com rotação aos 10 MB.
+- **Tool Gateway:** registro com escopos, classe de custo, evento de auditoria e configuração que
+  habilita cada ferramenta. Novos escopos: `workspace:read`, `git:read`, `mission:control` e
+  `mission:lease`.
+
+### Corrigido na auditoria da entrega (antes de qualquer publicação)
+
+- `git_readonly` executava programas definidos na configuração do repositório (`core.fsmonitor`,
+  filtros).
+- `delegate` passou a cortar respostas em 12 000 caracteres por padrão, quebrando o contrato da 4.0.0.
+- `output_schema` apagava a síntese do `consensus` e a integração do `swarm_run`.
+- **Leitura de projeto:**
+  - `.npmrc`, `.git-credentials`, `.netrc`, `*.pfx` e similares eram legíveis;
+  - segredos dentro de arquivos permitidos saíam sem máscara;
+  - a busca olhava só os primeiros arquivos;
+  - uma regex catastrófica travava o servidor.
+- **Privacidade:**
+  - a máscara de telefone e cartão corrompia números em código;
+  - segredos iam sem máscara com `allow_cloud`;
+  - `local_only` não tinha efeito;
+  - `git_diff` nunca era anexado.
+- **Idempotência e cache:**
+  - a mesma chave devolvia o resultado de outro prompt ou de outra identidade;
+  - o cache ignorava `detail`.
+- **Travas:** a reivindicação não era atômica, a trava não era verificada por nenhuma ferramenta e a
+  identidade sozinha renovava.
+- **Missões:**
+  - o diagnóstico enviado era `[object Object]`;
+  - a estagnação nunca era detectada;
+  - evidência de teste antiga concluía a missão;
+  - `mission_resume` trocava o objetivo pelo diagnóstico;
+  - `mission_cancel` reescrevia jobs terminados como cancelados;
+  - jobs sem limite de concorrência.
+- **MCP:** `resources/list` devolvia um modelo de URI em vez de recursos, erros de resource viravam
+  `-32603`, `resources/*` ignorava escopos e `prompts/get` aceitava qualquer argumento.
+- **Log de auditoria:** gravações concorrentes quebravam a cadeia de hashes.
+- **`handoff_export`:** devolvia uma string sem objeto estruturado.
+
+### Testes
+
+- `test/audit-410-tools.test.js` e `test/audit-410-missions.test.js`: 18 testes, todos falhavam na
+  entrega recebida.
+- `test/workspace.test.js` e `test/coordination.test.js`: testes da entrega mantidos.
+
 ## 4.0.0 — 2026-09-15 — cost policy, reliable failover, cancellation, concurrent stdio and smaller results
 
 Versão maior, pela mesma regra da 3.0.0: vários padrões mudaram de forma incompatível. Siga o roteiro

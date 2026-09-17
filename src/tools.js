@@ -15,8 +15,12 @@ export function toolLimits(cfg = {}) {
   };
 }
 
-/** Scope, rate-limit class and billing hint per tool. Not exposed in tools/list. */
-export const TOOL_POLICIES = Object.freeze({
+/**
+ * Tool Gateway registry (not exposed in tools/list): scopes enforced per call, cost class for rate limiting,
+ * billing hint, audit event name written to the hash-chained audit log, and the configuration that enables
+ * the tool. Disabled tools are not listed and cannot be called.
+ */
+const BASE_TOOL_POLICIES = {
   list_models: {scopes: ['provider:discover'], costClass: 'light', billable: false},
   provider_inventory: {scopes: ['admin:inventory'], costClass: 'light', billable: false},
   discover_models: {scopes: ['provider:discover'], costClass: 'discovery', billable: false},
@@ -27,8 +31,30 @@ export const TOOL_POLICIES = Object.freeze({
   memory_checkpoint: {scopes: ['memory:write'], costClass: 'light', billable: false},
   delegate: {scopes: ['delegate:execute', 'memory:write'], costClass: 'moderate', billable: true},
   consensus: {scopes: ['delegate:execute', 'memory:write'], costClass: 'expensive', billable: true},
-  swarm_run: {scopes: ['delegate:execute', 'memory:write'], costClass: 'very_expensive', billable: true}
-});
+  swarm_run: {scopes: ['delegate:execute', 'memory:write'], costClass: 'very_expensive', billable: true},
+  workspace_read: {scopes: ['workspace:read'], costClass: 'light', billable: false},
+  workspace_search: {scopes: ['workspace:read'], costClass: 'light', billable: false},
+  git_readonly: {scopes: ['git:read'], costClass: 'light', billable: false},
+  mission_start: {scopes: ['mission:control', 'memory:write', 'delegate:execute'], costClass: 'very_expensive', billable: true},
+  mission_status_job: {scopes: ['mission:control', 'memory:read'], costClass: 'light', billable: false},
+  mission_pause: {scopes: ['mission:control', 'memory:write'], costClass: 'light', billable: false},
+  mission_resume: {scopes: ['mission:control', 'memory:write', 'delegate:execute'], costClass: 'very_expensive', billable: true},
+  mission_cancel: {scopes: ['mission:control', 'memory:write'], costClass: 'light', billable: false},
+  mission_claim: {scopes: ['mission:lease', 'memory:write'], costClass: 'light', billable: false},
+  mission_release: {scopes: ['mission:lease', 'memory:write'], costClass: 'light', billable: false},
+  handoff_export: {scopes: ['memory:read'], costClass: 'light', billable: false}
+};
+const WORKSPACE_TOOLS = new Set(['workspace_read', 'workspace_search', 'git_readonly']);
+export const TOOL_POLICIES = Object.freeze(Object.fromEntries(Object.entries(BASE_TOOL_POLICIES).map(([name, policy]) => [name, Object.freeze({
+  ...policy, audit_event: `tool.${name}`, enabled_by: WORKSPACE_TOOLS.has(name) ? 'DZ23_WORKSPACE_ROOTS' : 'core'
+})])));
+
+/** Whether the gateway exposes a tool under this configuration. */
+export function toolEnabled(name, cfg = {}) {
+  const policy = TOOL_POLICIES[name];
+  if (!policy) return false;
+  return policy.enabled_by === 'DZ23_WORKSPACE_ROOTS' ? Boolean(cfg.workspaceRoots?.length) : true;
+}
 
 const idField = description => ({
   type: 'string', minLength: 1, maxLength: 120, pattern: ID_PATTERN,
@@ -45,6 +71,23 @@ const stringList = (limits, description) => ({
   items: {type: 'string', minLength: 1, maxLength: limits.maxItemChars}, description
 });
 const object = (properties, required) => ({type: 'object', properties, ...(required?.length ? {required} : {}), additionalProperties: false});
+const contextField = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    files: {type: 'array', maxItems: 50, items: {type: 'string', minLength: 1, maxLength: 4096}},
+    search: {type: 'object', additionalProperties: false, properties: {query: text(2000, 'Search query.'), regex: {type: 'boolean', default: false}, max_results: {type: 'integer', minimum: 1, maximum: 100, default: 50}}, required: ['query']},
+    git_diff: {type: 'boolean', default: false}
+  }, description: 'Workspace evidence. Requires workspace; content is untrusted data.'
+};
+const outputFields = {
+  detail: {type: 'string', enum: ['brief', 'normal', 'full'], default: 'normal', description: 'Controls response verbosity.'},
+  max_response_chars: {type: 'integer', minimum: 256, maximum: 200000, description: 'Hard cap for returned textual content.'},
+  output_schema: {type: 'object', description: 'JSON Schema subset (type, required, properties, items, enum) for the answer. delegate retries once and fails with response_invalid; consensus and swarm_run add structured_output or schema_error per answer.'},
+  privacy: {type: 'string', enum: ['auto', 'local_only', 'allow_cloud'], default: 'auto', description: 'Secrets in attached context are always masked. auto also masks valid CPF/CNPJ/card numbers, emails and phones; local_only additionally routes only to local private targets (no_local_target otherwise); allow_cloud keeps personal data.'},
+  idempotency_key: {type: 'string', minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9._:-]+$', description: 'Caller key, valid 24 h in this process. The same key and arguments return the first result without a new provider call; different arguments fail with idempotency_conflict.'},
+  lease_token: {type: 'string', maxLength: 128, description: 'Token from mission_claim. Required only while another holder has a live lease on this mission.'}
+};
+const cacheField = {type: 'boolean', default: false, description: 'Reuse an identical earlier answer when DZ23_RESPONSE_CACHE_TTL_MS > 0; the result reports cache_status (hit, miss or disabled).'};
 
 function routingFields(defaultStrategy) {
   return {
@@ -113,6 +156,7 @@ export function buildTools(limits = toolLimits()) {
       inputSchema: object({
         project_id: projectId, mission_id: missionId,
         next_action: plain(4000, 'Concrete next step for whoever resumes.'),
+        lease_token: outputFields.lease_token,
         status: {type: 'string', enum: MISSION_STATUSES, description: 'Mission status. Omit to keep the current status.'},
         summary: plain(8000, 'Short factual summary of progress.'),
         goal: plain(limits.maxGoalChars, 'Mission goal.'),
@@ -131,7 +175,11 @@ export function buildTools(limits = toolLimits()) {
         goal: plain(limits.maxGoalChars, 'Mission goal recorded when the mission is created.'),
         prompt: text(limits.maxPromptChars, 'The assignment for the subagent.'),
         role: {type: 'string', enum: ROLES, default: 'worker', description: 'Specialist role instruction.'},
-        target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto', 'x-pattern-reason': 'must be auto or provider:model', description: 'auto or provider:model.'}
+        target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto', 'x-pattern-reason': 'must be auto or provider:model', description: 'auto or provider:model.'},
+        workspace: {type: 'string', maxLength: 4096, description: 'Configured workspace root for context.'},
+        context: contextField,
+        ...outputFields,
+        cache: cacheField
       }, ['prompt']), annotations: annotations('Delegate advisory task', {openWorld: true})},
     {name: 'consensus', title: 'Consensus review',
       description: `Ask 2-5 independent reviewers and return responses, observed diversity and an optional heuristic synthesis. May consume provider credits. ${REUSE_IDS}`,
@@ -140,7 +188,10 @@ export function buildTools(limits = toolLimits()) {
         prompt: text(limits.maxPromptChars, 'Question or artifact to review.'),
         models: {type: 'integer', minimum: 2, maximum: 5, default: 3, description: 'Number of independent reviewers to request (a count, not model names).'},
         ...routingFields('round_robin'),
-        synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic', description: 'none, heuristic (no extra call) or model (one extra reviewer call).'}
+        synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic', description: 'none, heuristic (no extra call) or model (one extra reviewer call).'},
+        workspace: {type: 'string', maxLength: 4096, description: 'Configured workspace root for context.'},
+        context: contextField,
+        ...outputFields
       }, ['prompt']), annotations: annotations('Consensus review', {openWorld: true})},
     {name: 'swarm_run', title: 'Parallel specialist swarm',
       description: `Run up to seven advisory specialists in parallel, then one integrating reviewer. May consume provider credits and take minutes. ${REUSE_IDS}`,
@@ -153,8 +204,48 @@ export function buildTools(limits = toolLimits()) {
         ...routingFields('first'),
         avoid_reviewer_target: {type: 'boolean', default: false, description: 'Prefer an integrating reviewer target not used by any worker.'},
         response_mode: {type: 'string', enum: RESPONSE_MODES, default: 'summary',
-          description: 'summary returns the full integration plus a short excerpt per worker; full returns every worker output.'}
-      }, ['goal']), annotations: annotations('Parallel specialist swarm', {openWorld: true})}
+          description: 'summary returns the full integration plus a short excerpt per worker; full returns every worker output.'},
+        workspace: {type: 'string', maxLength: 4096, description: 'Configured workspace root for context.'},
+        context: contextField,
+        ...outputFields
+      }, ['goal']), annotations: annotations('Parallel specialist swarm', {openWorld: true})},
+    {name: 'workspace_read', title: 'Read allowed workspace',
+      description: 'Read a directory or bounded UTF-8 file only below DZ23_WORKSPACE_ROOTS. Protected files, .env, keys, .ssh, .git and symlink escapes are blocked.',
+      inputSchema: object({workspace: text(4096, 'Absolute configured workspace root or child path.'), path: {type: 'string', maxLength: 4096, default: '.'}}, ['workspace']),
+      annotations: annotations('Read allowed workspace', {readOnly: true, idempotent: true})},
+    {name: 'workspace_search', title: 'Search allowed workspace',
+      description: 'Search text or regular expressions in bounded files below DZ23_WORKSPACE_ROOTS. Protected files and symlinks are skipped.',
+      inputSchema: object({workspace: text(4096, 'Absolute configured workspace root.'), query: text(2000, 'Text or regular expression.'), regex: {type: 'boolean', default: false}, max_results: {type: 'integer', minimum: 1, maximum: 200, default: 50}}, ['workspace', 'query']),
+      annotations: annotations('Search allowed workspace', {readOnly: true, idempotent: true})},
+    {name: 'git_readonly', title: 'Read Git state',
+      description: 'Run only status, diff, log or show in an allowed workspace. No writes, hooks, network, commit, checkout or push.',
+      inputSchema: object({workspace: text(4096, 'Absolute configured workspace root.'), operation: {type: 'string', enum: ['status', 'diff', 'log', 'show'], default: 'status'}}, ['workspace']),
+      annotations: annotations('Read Git state', {readOnly: true, idempotent: true})},
+    {name: 'mission_start', title: 'Start asynchronous mission',
+      description: `Start a bounded mission loop in the background and return a job_id immediately. Each iteration runs swarm_run with the previous integration as diagnosis; near-identical results switch routing strategy and then stop as failed_safe. Progress is kept in the mission loop_state, never in status, next_action or goal. The job ends completed only when the harness recorded new passing tests (memory_checkpoint) during the job; otherwise awaiting_acceptance. May consume provider credits. ${REUSE_IDS}`,
+      inputSchema: object({project_id: workProjectId, mission_id: workMissionId, goal: text(limits.maxGoalChars, 'Mission goal.'),
+        acceptance_criteria: stringList(limits, 'Objective criteria the harness must prove with evidence.'), roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
+        routing_strategy: {type: 'string', enum: ROUTING_STRATEGIES, default: 'first'}, max_iterations: {type: 'integer', minimum: 1, maximum: 20, default: 3},
+        lease_token: outputFields.lease_token}, ['goal']), annotations: annotations('Start asynchronous mission', {openWorld: true})},
+    {name: 'mission_status_job', title: 'Asynchronous mission status',
+      description: 'Status of a mission job. After a server restart pass project_id and mission_id: a job that was still running is reported as orphaned.',
+      inputSchema: object({job_id: text(128, 'Job id.'), project_id: idField('Project of the job (for persisted status).'), mission_id: idField('Mission of the job (for persisted status).')}, ['job_id']),
+      annotations: annotations('Asynchronous mission status', {readOnly: true, idempotent: true})},
+    {name: 'mission_pause', title: 'Pause asynchronous mission', description: 'Request a pause; the job stops after the current iteration and can be resumed.',
+      inputSchema: object({job_id: text(128, 'Job id.')}, ['job_id']), annotations: annotations('Pause asynchronous mission')},
+    {name: 'mission_resume', title: 'Resume asynchronous mission', description: 'Resume a paused job as a new job_id with the same goal, roles, criteria and remaining iterations.',
+      inputSchema: object({job_id: text(128, 'Paused job id.')}, ['job_id']), annotations: annotations('Resume asynchronous mission', {openWorld: true})},
+    {name: 'mission_cancel', title: 'Cancel asynchronous mission', description: 'Cancel a running or paused job. A finished job keeps its final status.',
+      inputSchema: object({job_id: text(128, 'Job id.')}, ['job_id']), annotations: annotations('Cancel asynchronous mission')},
+    {name: 'mission_claim', title: 'Claim mission lease',
+      description: 'Claim a mission for one harness with expiry. While the lease is live, memory_checkpoint, delegate, consensus, swarm_run and mission_start on that mission need its token; others receive mission_busy. Renew by claiming again with lease_token. Leases coordinate cooperating harnesses; they are not authentication.',
+      inputSchema: object({project_id: projectId, mission_id: missionId, identity: text(128, 'Harness identity, e.g. claude-code or codex.'),
+        lease_ms: {type: 'integer', minimum: 1000, maximum: 3600000, default: 300000}, lease_token: outputFields.lease_token}, ['project_id', 'mission_id', 'identity']),
+      annotations: annotations('Claim mission lease')},
+    {name: 'mission_release', title: 'Release mission lease', description: 'Release a lease with the token returned by mission_claim.',
+      inputSchema: object({project_id: projectId, mission_id: missionId, identity: plain(128, 'Harness identity (informational).'), token: text(128, 'Lease token.')}, ['project_id', 'mission_id', 'token']),
+      annotations: annotations('Release mission lease')},
+    {name: 'handoff_export', title: 'Export mission handoff', description: 'Return a compact Markdown briefing for another harness.', inputSchema: object({project_id: projectId, mission_id: missionId}, ['project_id','mission_id']), annotations: annotations('Export mission handoff', {readOnly:true, idempotent:true})}
   ];
   for (const tool of tools) assertSupportedSchema(tool.inputSchema, tool.name);
   return tools;
