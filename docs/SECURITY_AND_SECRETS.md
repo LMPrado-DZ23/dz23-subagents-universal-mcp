@@ -97,6 +97,18 @@ Chamadas canceladas ou com timeout depois de enviadas ao provider entram no orç
 - Travas de missão coordenam harnesses que cooperam; não são controle de acesso. O log de auditoria detecta
   edição de linhas, mas quem controla o diretório de estado pode reescrevê-lo por inteiro.
 
+## Painel e sandbox de patch (4.2.0)
+
+- O painel escuta só em `127.0.0.1`, recusa `Host` diferente de loopback, exige o token aleatório da execução
+  (comparação em tempo constante), só responde `GET` e não mostra chaves nem tokens de trava.
+- `patch_validate` fica desligado por padrão. O cliente não escolhe comandos: só um dos definidos pelo operador em
+  `DZ23_SANDBOX_COMMANDS`, por igualdade exata. O diff é aplicado num clone temporário; caminhos protegidos,
+  absolutos, `..` e `.git` são recusados antes de copiar. O comando recebe ambiente mínimo, sem as chaves de
+  provedor do servidor. O diff é código escrito pelo cliente e o comando de teste o executa: por isso o padrão é
+  `docker` (`--network none`, limites de CPU, memória e processos), e symlinks e submódulos no diff são recusados.
+  **O modo `process` (só com `DZ23_SANDBOX_MODE=process`) não tem isolamento de rede nem de sistema de arquivos**:
+  o código do diff roda com o usuário do servidor.
+
 ## Outros cuidados
 
 - `ALIBABA_API_KEY`/`DZ23_ALIBABA_BASE_URL` são separados de OpenAI. Together aceita

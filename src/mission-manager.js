@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import {ToolError} from './errors.js';
+import {validatePlan, planHash, runDag, initialDagState, dagSummary} from './mission-dag.js';
 
 // Asynchronous mission jobs. Jobs live in this process; their progress is persisted in the mission's
 // loop_state (never in the harness-owned status, next_action or goal) so another process can see a
@@ -55,6 +56,7 @@ async function execute(job, {router, memory}) {
   }
   job.state = 'running';
   await saveLoop(memory, job, {status: 'running', started_at: job.started_at});
+  if (job.nodes) return executePlan(job, {router, memory});
   while (job.iteration < job.max_iterations) {
     if (signal.aborted) throw stopError(signal);
     job.iteration++;
@@ -82,11 +84,31 @@ async function execute(job, {router, memory}) {
       return;
     }
   }
+  await finishWithEvidence(job, memory);
+}
+
+async function finishWithEvidence(job, memory) {
   const tests = (await memory.getMission(job.project_id, job.mission_id))?.tests || {};
   const fresh = JSON.stringify(tests) !== job.tests_baseline && tests.passed?.length > 0 && !(tests.failed?.length);
   job.state = fresh ? 'completed' : 'awaiting_acceptance';
   await saveLoop(memory, job, {status: job.state, finished_at: now(),
     evidence: fresh ? 'harness recorded passing tests during this job' : 'record passing tests with memory_checkpoint, then run the job again to complete'});
+}
+
+/** DAG plan: nodes run through runDag; completion still needs harness test evidence. */
+async function executePlan(job, {router, memory}) {
+  if (!job.dag) job.dag = initialDagState(job.nodes, job.resume_plan ? (await memory.getMission(job.project_id, job.mission_id))?.dag_state : null, job.plan_hash);
+  const result = await runDag(job, {router, memory, parallel: router.cfg?.missionParallelNodes || 3, stopError});
+  job.iteration = Object.values(job.dag).filter(n => n.status === 'done').length;
+  if (result.status === 'paused') { job.state = 'paused'; await saveLoop(memory, job, {status: 'paused', dag: dagSummary(job.dag)}); return; }
+  if (result.status === 'failed') {
+    job.state = 'failed';
+    job.reason = 'dag_nodes_failed';
+    job.failed_nodes = result.failed_nodes;
+    await saveLoop(memory, job, {status: 'failed', reason: 'dag_nodes_failed', failed_nodes: result.failed_nodes, dag: dagSummary(job.dag), finished_at: now()});
+    return;
+  }
+  await finishWithEvidence(job, memory);
 }
 
 function launch(deps, job) {
@@ -106,17 +128,20 @@ function launch(deps, job) {
 }
 
 export function missionStart(deps, args = {}) {
+  const nodes = args.plan ? validatePlan(args.plan) : null;
   return launch(deps, {
+    ...(nodes ? {nodes, plan_hash: planHash(nodes), resume_plan: args.resume_plan === true} : {}),
     id: `job-${crypto.randomUUID()}`, project_id: args.project_id || 'default', mission_id: args.mission_id || crypto.randomUUID(), goal: args.goal,
     roles: args.roles?.length ? args.roles : ['architect', 'security', 'qa'], routing_strategy: args.routing_strategy || 'first', acceptance_criteria: args.acceptance_criteria,
-    max_iterations: args.max_iterations || 3, iteration: 0, repeats: 0, state: 'queued', started_at: now(), controller: new AbortController(), pauseRequested: false
+    max_iterations: nodes ? nodes.length : args.max_iterations || 3, iteration: 0, repeats: 0, state: 'queued', started_at: now(), controller: new AbortController(), pauseRequested: false
   });
 }
 
 export async function missionStatus(memory, {job_id, project_id, mission_id} = {}) {
   const job = jobs.get(job_id);
   if (job) return {job_id, project_id: job.project_id, mission_id: job.mission_id, status: job.state, iteration: job.iteration, max_iterations: job.max_iterations,
-    ...(job.reason ? {reason: job.reason} : {}), ...(job.resumed_as ? {resumed_as: job.resumed_as} : {})};
+    ...(job.reason ? {reason: job.reason} : {}), ...(job.resumed_as ? {resumed_as: job.resumed_as} : {}),
+    ...(job.dag ? {dag: dagSummary(job.dag)} : {}), ...(job.failed_nodes ? {failed_nodes: job.failed_nodes} : {})};
   const loop = project_id && mission_id ? (await memory.getMission(project_id, mission_id))?.loop_state : null;
   if (!loop || loop.job_id !== job_id) throw new ToolError('job_not_found', 'Mission job was not found in this process; pass project_id and mission_id to read persisted state');
   const status = ['running', 'queued', 'iteration_completed'].includes(loop.status) ? 'orphaned' : loop.status;

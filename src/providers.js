@@ -1,3 +1,4 @@
+import {parseRateLimits} from './routing-stats.js';
 import fs from 'node:fs';
 import {ProviderError, classifyHttpFailure, parseRetryAfter} from './provider-errors.js';
 import {isPrivateEndpoint, privateHostList} from './endpoints.js';
@@ -145,7 +146,7 @@ async function boundedText(response, target, maxBytes) {
 }
 
 /** Fetch JSON with timeout, size bound and classified failures. Raw bodies never leave this function. */
-async function requestJson(target, url, {method = 'POST', headers = {}, body, timeoutMs = 90_000, signal, maxResponseBytes = 2 * 1024 * 1024}) {
+async function requestJson(target, url, {method = 'POST', headers = {}, body, timeoutMs = 90_000, signal, maxResponseBytes = 2 * 1024 * 1024, limits}) {
   const meta = {provider: target.name, model: target.model};
   if (signal?.aborted) throw new ProviderError({...meta, kind: 'provider_error', detail: 'request cancelled'});
   const controller = new AbortController();
@@ -161,6 +162,7 @@ async function requestJson(target, url, {method = 'POST', headers = {}, body, ti
     try { response = await fetch(url, {method, headers, signal: controller.signal, ...(body === undefined ? {} : {body: JSON.stringify(body)})}); } catch { throw transportError(); }
     let text;
     try { text = await boundedText(response, target, maxResponseBytes); } catch (error) { if (error instanceof ProviderError) throw error; throw transportError(); }
+    if (limits) Object.assign(limits, parseRateLimits(response.headers) || {});
     if (!response.ok) throw new ProviderError({...meta, kind: classifyHttpFailure(response.status, text), status: response.status, retryAfterMs: parseRetryAfter(response.headers?.get?.('retry-after'))});
     try { return JSON.parse(text); } catch { throw new ProviderError({...meta, kind: 'response_invalid', detail: 'invalid JSON'}); }
   } finally {
@@ -176,12 +178,13 @@ function noContent(target) {
 export async function callOpenAICompatible(target, messages, {timeoutMs = 90_000, signal, temperature = 0.2, maxTokens = 4096, maxResponseBytes = 2 * 1024 * 1024} = {}) {
   const headers = {'content-type': 'application/json'};
   if (target.apiKey && target.apiKey !== 'local') headers.authorization = `Bearer ${target.apiKey}`;
+  const limits = {};
   const data = await requestJson(target, `${target.baseURL.replace(/\/$/, '')}/chat/completions`, {
-    headers, timeoutMs, signal, maxResponseBytes, body: {model: target.model, messages, temperature, max_tokens: maxTokens}
+    headers, timeoutMs, signal, maxResponseBytes, limits, body: {model: target.model, messages, temperature, max_tokens: maxTokens}
   });
   const content = data?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || !content.trim()) throw noContent(target);
-  return {content, usage: data.usage || null};
+  return {content, usage: data.usage || null, ...(Object.keys(limits).length ? {rate_limits: limits} : {})};
 }
 
 function anthropicMessages(messages) {
@@ -192,13 +195,15 @@ function anthropicMessages(messages) {
 
 export async function callAnthropic(target, messages, {timeoutMs = 90_000, signal, temperature = 0.2, maxTokens = 4096, maxResponseBytes = 2 * 1024 * 1024} = {}) {
   const {system, messages: anthropic} = anthropicMessages(messages);
+  const limits = {};
   const data = await requestJson(target, `${target.baseURL.replace(/\/$/, '')}/messages`, {
+    limits,
     headers: {'content-type': 'application/json', 'x-api-key': target.apiKey, 'anthropic-version': '2023-06-01'},
     timeoutMs, signal, maxResponseBytes, body: {model: target.model, system, messages: anthropic, temperature, max_tokens: maxTokens}
   });
   const content = (data?.content || []).filter(part => part?.type === 'text').map(part => part.text).join('\n');
   if (!content.trim()) throw noContent(target);
-  return {content, usage: data.usage || null};
+  return {content, usage: data.usage || null, ...(Object.keys(limits).length ? {rate_limits: limits} : {})};
 }
 
 export async function callProvider(target, messages, opts = {}) {

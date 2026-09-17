@@ -9,6 +9,7 @@ import {buildMessages} from './prompts.js';
 import {nullLogger} from './logger.js';
 import {BudgetLedger} from './budget.js';
 import {runConsensus, runSwarm} from './orchestration.js';
+import {createRoutingStats, taskTypeOf} from './routing-stats.js';
 
 /** Per-target maps accept caller-chosen model names, so they are bounded (oldest entry evicted). */
 const boundedSet = (map, key, value) => { if (!map.has(key) && map.size >= 512) map.delete(map.keys().next().value); map.set(key, value); };
@@ -41,7 +42,7 @@ function attemptRecord(error, attempt) {
 }
 
 export class Router {
-  constructor(cfg, memory, {caller = callProvider, registry, discoverer = discoverModels, logger = nullLogger, metrics = null, sleep = realSleep, random = Math.random, clock = Date.now, budget} = {}) {
+  constructor(cfg, memory, {caller = callProvider, registry, discoverer = discoverModels, logger = nullLogger, metrics = null, sleep = realSleep, random = Math.random, clock = Date.now, budget, stats} = {}) {
     this.cfg = cfg;
     this.memory = memory;
     this.caller = caller;
@@ -59,6 +60,7 @@ export class Router {
     this.limiter = new ConcurrencyLimiter(cfg.maxConcurrency || 7, cfg.maxWorkersPerTarget || 4, cfg.maxQueue || 32);
     this.retry = {maxRetries: cfg.maxRetries ?? 1, baseDelayMs: cfg.retryBaseDelayMs ?? 500, capMs: cfg.retryAfterCapMs ?? 30_000};
     this.budget = budget || new BudgetLedger(cfg, memory, {clock, metrics});
+    this.stats = stats === undefined ? createRoutingStats(cfg, {clock}) : stats;
     logger.addSecrets?.(Object.values(this.registry).map(provider => provider.apiKey));
     if (metrics) {
       metrics.gauge('active_calls', () => this.limiter.active);
@@ -195,12 +197,11 @@ export class Router {
     return [...this.exhausted].filter(([, entry]) => entry.until > now).map(([target, entry]) => ({target, kind: entry.kind, remaining_ms: entry.until - now}));
   }
 
-  availableTargets() {
+  /** Eligible targets not cooling down, adaptively ordered inside each cost tier for the task type. */
+  availableTargets(taskType = 'general') {
     const now = this.clock();
-    return this.targets().filter(target => {
-      const cooldown = this.exhausted.get(targetKey(target));
-      return !cooldown || now > cooldown.until;
-    });
+    const ready = this.targets().filter(target => { const cooldown = this.exhausted.get(targetKey(target)); return !cooldown || now > cooldown.until; });
+    return this.stats ? this.stats.order(ready, this.cfg, taskType) : ready;
   }
 
   /** Tiny real generation per target. Respects the daily/call cost limits and the unknown-cost policy. */
@@ -336,7 +337,7 @@ export class Router {
    * (no provider call when denied) and settled afterwards, retries included. A cancelled call is neither a
    * provider failure (no retry, cooldown or failover) nor free: it is settled as failed and rethrown.
    */
-  async attemptTarget(target, messages, {project_id, mission_id, role, request_id, log, signal}) {
+  async attemptTarget(target, messages, {project_id, mission_id, role, request_id, log, signal, task_type = taskTypeOf(role)}) {
     const attempts = [];
     const startedAt = this.clock();
     const maxTokens = this.cfg.maxOutputTokens || 4096;
@@ -365,6 +366,7 @@ export class Router {
           const error = toProviderError(raw, target);
           await this.budget.settle(admission.reservation, {...settleDetails, status: 'failed', kind: error.kind});
           attempts.push(attemptRecord(error, attempt));
+          this.stats?.record(target, task_type, {ok: false, kind: error.kind});
           this.metrics?.increment('provider_failures_total', {kind: error.kind});
           log.warn('provider_call_failed', {provider: target.name, model: target.model, attempt, duration_ms: this.clock() - callStarted, status: 'failed',
             kind: error.kind, retryable: error.retryable, http_status: error.status, retry_after_ms: error.retryAfterMs || undefined});
@@ -377,6 +379,7 @@ export class Router {
           continue;
         }
         const latencyMs = this.clock() - callStarted;
+        this.stats?.record(target, task_type, {ok: true, latencyMs, rateLimits: output?.rate_limits});
         const memoryWarnings = [];
         let usage = null;
         // The provider already answered (and may have billed): bookkeeping failures never discard the answer.
@@ -400,7 +403,7 @@ export class Router {
     }
   }
 
-  async delegate({project_id = 'default', mission_id = crypto.randomUUID(), goal, prompt, role = 'worker', target = 'auto', metadata = {}, request_id, independent = false, signal} = {}) {
+  async delegate({project_id = 'default', mission_id = crypto.randomUUID(), goal, prompt, role = 'worker', target = 'auto', metadata = {}, request_id, independent = false, signal, task_type} = {}) {
     if (!goal && !prompt) throw new ToolError('invalid_request', 'goal or prompt is required');
     assertRole(role);
     throwIfAborted(signal);
@@ -410,7 +413,8 @@ export class Router {
     await this.memory.assertHeadroom(project_id, mission_id); // a full mission fails before any billable call
     await this.memory.appendEvent(project_id, mission_id, 'delegation_started', {role, target, metadata, request_id});
     await this.refreshSharedCooldowns();
-    const candidates = [...preferred, ...this.availableTargets().filter(t => !preferred.some(p => targetKey(p) === targetKey(t)))];
+    const taskType = taskTypeOf(role, task_type);
+    const candidates = [...preferred, ...this.availableTargets(taskType).filter(t => !preferred.some(p => targetKey(p) === targetKey(t)))];
     if (!candidates.length) {
       await this.memory.appendEvent(project_id, mission_id, 'delegation_failed', {reason: 'no_providers', request_id});
       throw new ToolError('no_providers', 'No eligible providers are configured or all are cooling down', {cooldowns: this.cooldowns()});
@@ -429,7 +433,7 @@ export class Router {
         log.info('provider_failover', {provider: candidate.name, model: candidate.model, candidate_index: index});
       }
       const messages = buildMessages(role, context, assignment, {previousTargetFailed: attempts.length > 0});
-      const outcome = await this.attemptTarget(candidate, messages, {project_id, mission_id, role, request_id, log, signal});
+      const outcome = await this.attemptTarget(candidate, messages, {project_id, mission_id, role, request_id, log, signal, task_type: taskType});
       attempts.push(...outcome.attempts);
       if (outcome.denied) {
         denials.push(outcome.denied);

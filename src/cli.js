@@ -12,6 +12,7 @@ import {httpSecurityProblem} from './http.js';
 import {sha256Hex} from './auth.js';
 import {providerRegistry, parseTarget} from './providers.js';
 import {targetReport, withRotationOptIn, isEligible, ineligibleReason} from './targets.js';
+import {startDashboard} from './dashboard.js';
 
 export const EXIT = Object.freeze({OK: 0, PROBLEMS: 1, USAGE: 2, CONFIG: 78});
 const ID = new RegExp(ID_PATTERN);
@@ -30,6 +31,7 @@ Usage:
   dz23-subagents missions show <project_id> <mission_id> [--json]
   dz23-subagents memory repair [--project <id>] [--apply --yes] [--json]
   dz23-subagents token hash [--json]          SHA-256 of a token read from stdin (scoped token files)
+  dz23-subagents dashboard [--port <n>]       Read-only local dashboard (127.0.0.1, one-time token in the printed URL)
   dz23-subagents version | help
 
 Exit codes: 0 ok, 1 problems found, 2 usage error, 78 configuration error.`;
@@ -289,12 +291,23 @@ async function tokenCommand(positionals, opts, io) {
   return EXIT.OK;
 }
 
+async function dashboard(opts, io) {
+  const port = opts.port === undefined ? 8788 : Number(opts.port);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) throw new UsageError('--port must be an integer from 0 to 65535');
+  const cfg = config(io.env);
+  const {memory, router} = services(cfg);
+  const {server, url} = await startDashboard({cfg, memory, router, port});
+  io.stdout.write(`Dashboard (read-only, this computer only): ${url}\nThe token in the URL is valid until this command stops. Press Ctrl+C to stop.\n`);
+  await new Promise(resolve => { const stop = () => server.close(() => resolve()); process.once('SIGINT', stop); process.once('SIGTERM', stop); });
+  return EXIT.OK;
+}
+
 export async function runCli(argv, io = {stdout: process.stdout, stderr: process.stderr, stdin: process.stdin, env: process.env}) {
   let parsed;
   try {
     parsed = parseArgs({args: argv, allowPositionals: true, strict: true, options: {
       json: {type: 'boolean'}, yes: {type: 'boolean'}, apply: {type: 'boolean'}, project: {type: 'string'},
-      help: {type: 'boolean', short: 'h'}, version: {type: 'boolean'}
+      help: {type: 'boolean', short: 'h'}, version: {type: 'boolean'}, port: {type: 'string'}
     }});
   } catch (error) {
     const code = failure(io, argv.includes('--json'), 'usage_error', 'Usage error', error.message, EXIT.USAGE);
@@ -318,6 +331,7 @@ export async function runCli(argv, io = {stdout: process.stdout, stderr: process
       case 'missions': return await missions(rest, opts, io);
       case 'memory': return await memoryCommand(rest, opts, io);
       case 'token': return await tokenCommand(rest, opts, io);
+      case 'dashboard': return await dashboard(opts, io);
       default: throw new UsageError(`unknown command: ${String(command).slice(0, 40)}`);
     }
   } catch (error) {

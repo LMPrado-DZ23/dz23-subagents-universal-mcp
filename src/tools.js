@@ -3,6 +3,7 @@ import {
   SYNTHESIS_MODES, MISSION_STATUSES, CHECKPOINT_MERGE_MODES, EXPLICIT_TARGET_PATTERN, RESPONSE_MODES
 } from './constants.js';
 import {assertSupportedSchema} from './schema.js';
+import {TASK_TYPES} from './routing-stats.js';
 
 export const DEFAULT_TOOL_LIMITS = Object.freeze({maxPromptChars: 32_000, maxGoalChars: 8_000, maxListItems: 200, maxItemChars: 2_000});
 
@@ -42,17 +43,23 @@ const BASE_TOOL_POLICIES = {
   mission_cancel: {scopes: ['mission:control', 'memory:write'], costClass: 'light', billable: false},
   mission_claim: {scopes: ['mission:lease', 'memory:write'], costClass: 'light', billable: false},
   mission_release: {scopes: ['mission:lease', 'memory:write'], costClass: 'light', billable: false},
-  handoff_export: {scopes: ['memory:read'], costClass: 'light', billable: false}
+  handoff_export: {scopes: ['memory:read'], costClass: 'light', billable: false},
+  mission_list: {scopes: ['memory:read'], costClass: 'light', billable: false},
+  playbook_get: {scopes: ['memory:read'], costClass: 'light', billable: false},
+  routing_explain: {scopes: ['provider:discover'], costClass: 'light', billable: false},
+  cost_estimate: {scopes: ['provider:discover'], costClass: 'light', billable: false},
+  patch_validate: {scopes: ['sandbox:execute'], costClass: 'expensive', billable: false}
 };
 const WORKSPACE_TOOLS = new Set(['workspace_read', 'workspace_search', 'git_readonly']);
 export const TOOL_POLICIES = Object.freeze(Object.fromEntries(Object.entries(BASE_TOOL_POLICIES).map(([name, policy]) => [name, Object.freeze({
-  ...policy, audit_event: `tool.${name}`, enabled_by: WORKSPACE_TOOLS.has(name) ? 'DZ23_WORKSPACE_ROOTS' : 'core'
+  ...policy, audit_event: `tool.${name}`, enabled_by: name === 'patch_validate' ? 'DZ23_SANDBOX_ENABLED' : WORKSPACE_TOOLS.has(name) ? 'DZ23_WORKSPACE_ROOTS' : 'core'
 })])));
 
 /** Whether the gateway exposes a tool under this configuration. */
 export function toolEnabled(name, cfg = {}) {
   const policy = TOOL_POLICIES[name];
   if (!policy) return false;
+  if (policy.enabled_by === 'DZ23_SANDBOX_ENABLED') return Boolean(cfg.sandboxEnabled && cfg.workspaceRoots?.length && cfg.sandboxCommands?.length);
   return policy.enabled_by === 'DZ23_WORKSPACE_ROOTS' ? Boolean(cfg.workspaceRoots?.length) : true;
 }
 
@@ -175,6 +182,7 @@ export function buildTools(limits = toolLimits()) {
         goal: plain(limits.maxGoalChars, 'Mission goal recorded when the mission is created.'),
         prompt: text(limits.maxPromptChars, 'The assignment for the subagent.'),
         role: {type: 'string', enum: ROLES, default: 'worker', description: 'Specialist role instruction.'},
+        task_type: {type: 'string', enum: TASK_TYPES, description: 'Kind of task for adaptive model choice; defaults from role (backend/frontend=code, reviewer=review, qa=testing...).'},
         target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto', 'x-pattern-reason': 'must be auto or provider:model', description: 'auto or provider:model.'},
         workspace: {type: 'string', maxLength: 4096, description: 'Configured workspace root for context.'},
         context: contextField,
@@ -222,10 +230,17 @@ export function buildTools(limits = toolLimits()) {
       inputSchema: object({workspace: text(4096, 'Absolute configured workspace root.'), operation: {type: 'string', enum: ['status', 'diff', 'log', 'show'], default: 'status'}}, ['workspace']),
       annotations: annotations('Read Git state', {readOnly: true, idempotent: true})},
     {name: 'mission_start', title: 'Start asynchronous mission',
-      description: `Start a bounded mission loop in the background and return a job_id immediately. Each iteration runs swarm_run with the previous integration as diagnosis; near-identical results switch routing strategy and then stop as failed_safe. Progress is kept in the mission loop_state, never in status, next_action or goal. The job ends completed only when the harness recorded new passing tests (memory_checkpoint) during the job; otherwise awaiting_acceptance. May consume provider credits. ${REUSE_IDS}`,
+      description: `Start a mission in the background and return a job_id immediately. With plan, runs a task graph: nodes whose depends_on are done run in parallel (dependency results passed as untrusted data), failed nodes retry up to max_attempts, nodes after a failure are skipped, progress is saved in dag_state and resume_plan: true skips nodes already done (also after a restart). Without plan, runs a loop where each iteration runs swarm_run with the previous integration as diagnosis; near-identical results switch routing strategy and then stop as failed_safe. Progress is kept in the mission loop_state, never in status, next_action or goal. The job ends completed only when the harness recorded new passing tests (memory_checkpoint) during the job; otherwise awaiting_acceptance. May consume provider credits. ${REUSE_IDS}`,
       inputSchema: object({project_id: workProjectId, mission_id: workMissionId, goal: text(limits.maxGoalChars, 'Mission goal.'),
         acceptance_criteria: stringList(limits, 'Objective criteria the harness must prove with evidence.'), roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
         routing_strategy: {type: 'string', enum: ROUTING_STRATEGIES, default: 'first'}, max_iterations: {type: 'integer', minimum: 1, maximum: 20, default: 3},
+        plan: {type: 'object', additionalProperties: false, required: ['nodes'], description: 'Task graph (up to 30 nodes).', properties: {nodes: {type: 'array', minItems: 1, maxItems: 30, items: {
+          type: 'object', additionalProperties: false, required: ['id', 'prompt'], properties: {
+            id: {type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$', description: 'Unique node id.'}, title: plain(200, 'Short title.'),
+            role: {type: 'string', enum: ROLES, default: 'worker'}, prompt: text(limits.maxPromptChars, 'Task for this node.'),
+            depends_on: {type: 'array', maxItems: 30, uniqueItems: true, items: {type: 'string', maxLength: 64}}, task_type: {type: 'string', enum: TASK_TYPES},
+            max_attempts: {type: 'integer', minimum: 1, maximum: 3, default: 2}}}}}},
+        resume_plan: {type: 'boolean', default: false, description: 'Reuse nodes already done in this mission dag_state when the plan is identical.'},
         lease_token: outputFields.lease_token}, ['goal']), annotations: annotations('Start asynchronous mission', {openWorld: true})},
     {name: 'mission_status_job', title: 'Asynchronous mission status',
       description: 'Status of a mission job. After a server restart pass project_id and mission_id: a job that was still running is reported as orphaned.',
@@ -245,7 +260,26 @@ export function buildTools(limits = toolLimits()) {
     {name: 'mission_release', title: 'Release mission lease', description: 'Release a lease with the token returned by mission_claim.',
       inputSchema: object({project_id: projectId, mission_id: missionId, identity: plain(128, 'Harness identity (informational).'), token: text(128, 'Lease token.')}, ['project_id', 'mission_id', 'token']),
       annotations: annotations('Release mission lease')},
-    {name: 'handoff_export', title: 'Export mission handoff', description: 'Return a compact Markdown briefing for another harness.', inputSchema: object({project_id: projectId, mission_id: missionId}, ['project_id','mission_id']), annotations: annotations('Export mission handoff', {readOnly:true, idempotent:true})}
+    {name: 'handoff_export', title: 'Export mission handoff', description: 'Return a compact Markdown briefing for another harness.', inputSchema: object({project_id: projectId, mission_id: missionId}, ['project_id','mission_id']), annotations: annotations('Export mission handoff', {readOnly:true, idempotent:true})},
+    {name: 'mission_list', title: 'List missions', description: 'Missions with status, goal, next action, loop/graph progress and resource URI. Same data as MCP resources, for harnesses without resources support.',
+      inputSchema: object({project_id: idField('Only this project (optional).'), limit: {type: 'integer', minimum: 1, maximum: 200, default: 50}, cursor: {type: 'string', maxLength: 16, pattern: '^[0-9]+$'}}),
+      annotations: annotations('List missions', {readOnly: true, idempotent: true})},
+    {name: 'playbook_get', title: 'Get playbook', description: 'Without name: list the playbooks (the MCP prompts). With name and arguments: the rendered instructions. For harnesses without MCP prompts support.',
+      inputSchema: object({name: {type: 'string', maxLength: 64}, arguments: {type: 'object', additionalProperties: {type: 'string', maxLength: 8000}}}),
+      annotations: annotations('Get playbook', {readOnly: true, idempotent: true})},
+    {name: 'routing_explain', title: 'Explain model routing', description: 'Which models the server would use for a task type right now, in order, and why others are skipped: cost tier, eligibility, cooldowns, observed success and latency, quota from provider headers. No provider calls.',
+      inputSchema: object({task_type: {type: 'string', enum: TASK_TYPES}, role: {type: 'string', enum: ROLES, default: 'worker'}, target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto'}}),
+      annotations: annotations('Explain model routing', {readOnly: true, idempotent: true})},
+    {name: 'cost_estimate', title: 'Estimate call cost', description: 'Upper bound of calls, tokens and cost (when DZ23_PRICES_FILE has prices) for delegate, consensus or swarm_run before running it. No provider calls.',
+      inputSchema: object({tool: {type: 'string', enum: ['delegate', 'consensus', 'swarm_run'], default: 'delegate'}, prompt: plain(limits.maxPromptChars, 'Prompt or goal to size.'),
+        prompt_chars: {type: 'integer', minimum: 0, maximum: 1000000}, models: {type: 'integer', minimum: 2, maximum: 5, default: 3}, roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
+        max_agents: {type: 'integer', minimum: 1, maximum: 7}, synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic'}, task_type: {type: 'string', enum: TASK_TYPES}}),
+      annotations: annotations('Estimate call cost', {readOnly: true, idempotent: true})},
+    {name: 'patch_validate', title: 'Validate patch in sandbox',
+      description: 'Apply a unified diff to a throwaway copy of the repository at HEAD and run one allowlisted test command there (DZ23_SANDBOX_COMMANDS, exact match). The original working tree is never modified; nothing is committed or pushed. Process mode does not isolate the network; docker mode runs with --network none. Returns exit code, timeout flag and masked output tails.',
+      inputSchema: object({workspace: text(4096, 'Configured workspace root (git repository).'), patch: text(1_000_000, 'Unified diff (git diff format).'),
+        command: text(500, 'One command from DZ23_SANDBOX_COMMANDS.'), timeout_ms: {type: 'integer', minimum: 5000, maximum: 1800000}}, ['workspace', 'patch', 'command']),
+      annotations: annotations('Validate patch in sandbox', {openWorld: true})}
   ];
   for (const tool of tools) assertSupportedSchema(tool.inputSchema, tool.name);
   return tools;
