@@ -13,6 +13,7 @@ import {sha256Hex} from './auth.js';
 import {providerRegistry, parseTarget} from './providers.js';
 import {targetReport, withRotationOptIn, isEligible, ineligibleReason} from './targets.js';
 import {startDashboard} from './dashboard.js';
+import {cliAccountStatus, selectedAccountProviders} from './cli-providers.js';
 
 export const EXIT = Object.freeze({OK: 0, PROBLEMS: 1, USAGE: 2, CONFIG: 78});
 const ID = new RegExp(ID_PATTERN);
@@ -110,6 +111,16 @@ async function doctor(opts, io) {
   const unknown = cfg.rotation.filter(entry => { try { parseTarget(entry, router.registry); return false; } catch { return true; } });
   if (unknown.length) add('rotation', 'fail', `${unknown.length} DZ23_ROTATION entr${unknown.length === 1 ? 'y has' : 'ies have'} an unknown provider`);
   const targets = unknown.length ? [] : router.targets();
+  const selected = [...selectedAccountProviders(io.env)];
+  const accounts = await Promise.all(selected.map(name => cliAccountStatus(name, io.env)));
+  const installed = accounts.filter(a => a.installed);
+  if (selected.length) {
+    add('accounts', installed.some(a => a.logged_in) ? 'pass' : 'warn', installed.length
+      ? installed.map(a => `${a.provider} ${a.logged_in ? `logged in (${a.method})` : `not usable (${a.method}); run: ${a.login}`}`).join('; ')
+      : 'no selected account CLI is installed (claude-code, codex-cli, gemini-cli, qwen-code, copilot-cli, opencode, cursor-agent)');
+  } else {
+    add('accounts', 'pass', 'account providers off; set DZ23_ACCOUNT_PROVIDERS=auto to use logged-in AI CLIs before API keys');
+  }
   add('providers', targets.length ? 'pass' : 'fail',`${targets.length} eligible routing target(s), ${router.inventory().filter(p => p.enabled).length} enabled provider(s); no network calls made`);
   if (!unknown.length) {
     const report = targetReport(cfg, router.registry);

@@ -2,6 +2,7 @@ import {ToolError, RpcError, safeText} from './errors.js';
 import {targetKey, targetReport, effectiveTier} from './targets.js';
 import {taskTypeOf} from './routing-stats.js';
 import {getPrompt, listPrompts} from './mcp-resources.js';
+import {CLI_SPECS, cliAccountStatus, selectedAccountProviders} from './cli-providers.js';
 
 const CHARS_PER_TOKEN = 4;
 const CONTEXT_OVERHEAD_TOKENS = 1500;
@@ -47,6 +48,17 @@ export async function estimateCost(router, {tool = 'delegate', prompt = '', prom
   return {tool, calls, input_tokens_per_call: inputTokens, max_output_tokens_per_call: outputTokens, max_total_tokens: calls * (inputTokens + outputTokens),
     targets: perTarget, max_total_cost_usd: known ? Number((worst * calls).toFixed(6)) : null,
     note: known ? 'Upper bound: every call at the configured output limit on the most expensive listed target.' : 'Cost unknown for at least one target: configure DZ23_PRICES_FILE. Free tiers may still bill beyond their quota.'};
+}
+
+/** Account providers: which official CLIs are installed and logged in with an account (never an API key), and the OmniRoute gateway. */
+export async function accountStatus(router, {refresh = false} = {}) {
+  const selected = selectedAccountProviders(process.env);
+  const accounts = (await Promise.all(Object.keys(CLI_SPECS).map(name => cliAccountStatus(name, process.env, {refresh}))))
+    .map(account => ({...account, selected: selected.has(account.provider)}));
+  const gateway = router.registry.omniroute;
+  return {accounts, selection: process.env.DZ23_ACCOUNT_PROVIDERS || 'off', gateways: gateway ? [{provider: 'omniroute', configured: gateway.enabled, base_url: gateway.baseURL, tier: gateway.tier}] : [],
+    order: 'local models, then accounts (logged-in CLIs and account gateways), then free-tier APIs, then the rest; paid stays blocked without DZ23_ALLOW_PAID',
+    note: 'Log in once in each CLI with your account (the login command is listed); the server never uses a CLI that is logged in with an API key.'};
 }
 
 /** Missions across projects for harnesses without MCP resources support. */

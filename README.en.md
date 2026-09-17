@@ -6,12 +6,24 @@
 
 Self-hosted MCP router for delegating text/code tasks to AI models, running parallel
 specialists and keeping explicit, versioned mission memory that another harness can resume.
-Version 4.2.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
+Version 4.3.0 is an **engineering preview**, MIT licensed, Node.js 22+, no npm dependencies.
 The linked guides are in Portuguese.
 
 Workers return text/code. They do not execute shell commands, edit repositories, use browsers
 or run tests; the host harness owns those operations. Handoff works through persisted state,
 not hidden model thoughts or unrecorded client conversations.
+
+## What 4.3.0 provides
+
+- **Accounts before per-token APIs (4.3.0)**: an `account` cost tier between `local` and `free-tier` for
+  subscriptions you already pay for. The server runs the official AI CLIs **you** logged in yourself
+  (`claude-code`, `codex-cli`, `gemini-cli`, plus experimental adapters for Qwen Code, Copilot CLI, OpenCode
+  and Cursor Agent) headless, with no tools, no MCP servers, an empty temporary working directory and an
+  environment stripped of anything credential-shaped, so a CLI can never fall back to per-token billing. A CLI
+  logged in with an API key is refused instead. Account gateways such as a local OmniRoute (`omniroute`) join
+  the same tier. Calls are recorded at cost 0 with `cost_source: subscription`. Off by default:
+  `DZ23_ACCOUNT_PROVIDERS=auto` or a list. `account_status` and `doctor` report what is installed, what is
+  logged in and the exact login command to run.
 
 ## What 4.2.0 provides
 

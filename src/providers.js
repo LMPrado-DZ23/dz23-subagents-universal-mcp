@@ -2,6 +2,7 @@ import {parseRateLimits} from './routing-stats.js';
 import fs from 'node:fs';
 import {ProviderError, classifyHttpFailure, parseRetryAfter} from './provider-errors.js';
 import {isPrivateEndpoint, privateHostList} from './endpoints.js';
+import {callCli, cliRegistryEntries, listCliModels} from './cli-providers.js';
 
 export {classifyHttpFailure} from './provider-errors.js';
 
@@ -33,13 +34,15 @@ const defs = {
   cloudflare: {baseURL: '', keyName: 'CLOUDFLARE_WORKERS_AI_TOKEN', genericAliases: ['CLOUDFLARE_API_TOKEN', 'CLOUDFLARE_AUTH_TOKEN'], defaultModel: '@cf/openai/gpt-oss-120b', tier: 'free-tier', protocol: 'openai', location: 'cloud', capabilities: C()},
   custom: {baseURL: 'http://127.0.0.1:11434/v1', keyName: 'CUSTOM_API_KEY', defaultModel: 'qwen3-coder', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()},
   lmstudio: {baseURL: 'http://127.0.0.1:1234/v1', keyName: 'LMSTUDIO_API_KEY', defaultModel: 'local-model', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()},
-  vllm: {baseURL: 'http://127.0.0.1:8000/v1', keyName: 'VLLM_API_KEY', defaultModel: 'local-model', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()}
+  vllm: {baseURL: 'http://127.0.0.1:8000/v1', keyName: 'VLLM_API_KEY', defaultModel: 'local-model', tier: 'local', protocol: 'openai', location: 'local', capabilities: C()},
+  // Local account gateway (OmniRoute): routes to the accounts and free providers configured in it.
+  omniroute: {baseURL: 'http://127.0.0.1:20128/api/v1', keyName: 'OMNIROUTE_API_KEY', defaultModel: 'auto', tier: 'account', protocol: 'openai', location: 'local', capabilities: C()}
 };
 
 // Unprefixed <PROVIDER>_BASE_URL / _MODEL variables (OPENAI_BASE_URL, OLLAMA_BASE_URL, GROQ_MODEL...) are commonly set
 // for other tools; silently redirecting this server's cloud keys or models through them would be unsafe. Cloud providers
 // read only DZ23_<PROVIDER>_*; the local adapters keep their own specific legacy names (CUSTOM_BASE_URL, ...).
-const LEGACY_UNPREFIXED = new Set(['custom', 'lmstudio', 'vllm']);
+const LEGACY_UNPREFIXED = new Set(['custom', 'lmstudio', 'vllm', 'omniroute']);
 
 function envAny(names = [], env = process.env) {
   for (const name of names) {
@@ -93,6 +96,10 @@ function validateBaseURL(raw, name, privateHosts) {
 
 export function providerRegistry(env = process.env) {
   const privateHosts = privateHostList(env.DZ23_PRIVATE_HOSTS);
+  return {...cliRegistryEntries(env, C), ...apiRegistry(env, privateHosts)};
+}
+
+function apiRegistry(env, privateHosts) {
   return Object.fromEntries(Object.entries(defs).map(([name, d]) => {
     const specific = envAny([d.keyName, ...(d.aliases || [])], env);
     const generic = !specific.value && d.genericAliases ? envAny(d.genericAliases, env) : {value: '', source: 'none'};
@@ -209,6 +216,7 @@ export async function callAnthropic(target, messages, {timeoutMs = 90_000, signa
 export async function callProvider(target, messages, opts = {}) {
   if (!target.baseURL) throw new ProviderError({provider: target.name, model: target.model, kind: 'configuration_error', detail: 'missing base URL'});
   if (!target.model) throw new ProviderError({provider: target.name, model: '', kind: 'configuration_error', detail: 'missing model'});
+  if (target.protocol === 'cli') return callCli(target, messages, opts);
   return target.protocol === 'anthropic' ? callAnthropic(target, messages, opts) : callOpenAICompatible(target, messages, opts);
 }
 
@@ -236,6 +244,7 @@ export function catalogCapabilities(model = {}) {
 }
 
 export async function discoverModels(target, {timeoutMs = 15_000} = {}) {
+  if (target.protocol === 'cli') return {ok: true, models: (await listCliModels(target.name)).map(m => ({...m, catalog_capabilities: catalogCapabilities(m)}))};
   if (!target.baseURL) return {ok: false, models: [], kind: 'configuration_error', error: 'missing_base_url'};
   const headers = {};
   if (target.protocol === 'anthropic') { headers['x-api-key'] = target.apiKey; headers['anthropic-version'] = '2023-06-01'; }

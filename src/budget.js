@@ -64,9 +64,16 @@ export class BudgetLedger {
     return this.limits.prices[`${target.name}:${target.model}`] || this.limits.prices[`${target.name}:*`] || null;
   }
 
+  /** A configured price wins; account providers (subscriptions) otherwise cost nothing per token. */
   estimateCost(target, inputTokens, outputTokens) {
     const price = this.priceFor(target);
+    if (!price && target.tier === 'account') return 0;
     return price ? roundUsd((inputTokens * price.input_per_million_usd + outputTokens * price.output_per_million_usd) / 1e6) : null;
+  }
+
+  costSource(target, cost) {
+    if (cost === null) return 'unknown';
+    return !this.priceFor(target) && target.tier === 'account' ? 'subscription' : 'configured_price';
   }
 
   day() {
@@ -145,7 +152,7 @@ export class BudgetLedger {
       const output = Math.max(0, reservation.tokens - reservation.inputTokens);
       const cost = this.estimateCost(target, input, output);
       return {...base, input_tokens: input, output_tokens: output, total_tokens: input + output, token_source: 'reserved_estimate',
-        estimated_cost_usd: cost, cost_source: cost === null ? 'unknown' : 'configured_price'};
+        estimated_cost_usd: cost, cost_source: this.costSource(target, cost)};
     }
     if (status !== 'success') {
       return {...base, input_tokens: 0, output_tokens: 0, total_tokens: 0, token_source: 'none', estimated_cost_usd: null, cost_source: 'unknown'};
@@ -158,7 +165,7 @@ export class BudgetLedger {
       return {...base, ...tokens, estimated_cost_usd: roundUsd(usage.reported_cost_usd), cost_source: 'provider_usage'};
     }
     const cost = this.estimateCost(target, input, out);
-    return {...base, ...tokens, estimated_cost_usd: cost, cost_source: cost === null ? 'unknown' : 'configured_price'};
+    return {...base, ...tokens, estimated_cost_usd: cost, cost_source: this.costSource(target, cost)};
   }
 
   /** Persist the usage record for a finished attempt (idempotent) and release its reservation. */
