@@ -41,8 +41,10 @@ test('JSON-RPC envelope errors use standard codes and never guess an id', async 
   assert.deepEqual([nullId.response.id, nullId.response.error.code], [null, -32600]);
   const noVersion = await process({id: 7, method: 'ping'});
   assert.deepEqual([noVersion.response.id, noVersion.response.error.code], [7, -32600]);
-  const resources = await process({jsonrpc: '2.0', id: 'abc', method: 'resources/list'});
-  assert.equal(resources.response.result.resources.length, 1);
+  const unknown = await process({jsonrpc: '2.0', id: 'abc', method: 'sampling/createMessage'});
+  assert.deepEqual([unknown.response.id, unknown.response.error.code, unknown.response.error.message], ['abc', -32601, 'Method not found']);
+  const resources = await process({jsonrpc: '2.0', id: 'res', method: 'resources/list'});
+  assert.ok(Array.isArray(resources.response.result.resources));
   const badParams = await process({jsonrpc: '2.0', id: 3, method: 'tools/list', params: []});
   assert.equal(badParams.response.error.code, -32602);
 });

@@ -68,6 +68,12 @@ export function throwIfAborted(signal) {
 }
 
 const TOOL_ERROR_HTTP_STATUS = {
+  mission_busy: 409,
+  idempotency_conflict: 409,
+  no_local_target: 503,
+  response_invalid: 502,
+  workspace_denied: 403,
+  workspace_not_found: 404,
   cancelled: 499,
   deadline_exceeded: 504,
   context_too_large: 413,
