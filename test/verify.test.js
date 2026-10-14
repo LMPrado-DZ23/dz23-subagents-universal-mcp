@@ -46,7 +46,18 @@ test('verify_model requires explicit billable confirmation before any call', asy
   assert.equal((await rpc(call(3, 'verify_model', {target: 'auto', confirm_billable: true}))).response.error.data.field, 'target');
   const listed = (await rpc({jsonrpc: '2.0', id: 4, method: 'tools/list'})).response.result.tools.find(tool => tool.name === 'verify_model');
   assert.deepEqual([listed.inputSchema.properties.confirm_billable.const, listed.inputSchema.required], [true, ['target', 'confirm_billable']]);
+  assert.deepEqual(
+    [listed.inputSchema.properties.max_output_tokens.default, listed.inputSchema.properties.max_output_tokens.maximum],
+    [128, 512]
+  );
   assert.equal(calls.length, 0);
+});
+
+test('verification default leaves enough output budget for reasoning models', async t => {
+  const {router, calls} = await fixture(t);
+  const out = await router.verifyModel({target: 'p1:m1'});
+  assert.equal(out.ok, true);
+  assert.deepEqual(calls[0].options, {timeoutMs: 15_000, maxTokens: 128, maxResponseBytes: 65_536});
 });
 
 test('successful verification is minimal, persisted and visible in the inventory', async t => {

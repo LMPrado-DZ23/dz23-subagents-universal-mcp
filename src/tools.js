@@ -142,7 +142,7 @@ export function buildTools(limits = toolLimits()) {
         target: {type: 'string', pattern: EXPLICIT_TARGET_PATTERN, 'x-pattern-reason': 'must be provider or provider:model', description: 'provider:model to verify; it does not need to be in the rotation.'},
         confirm_billable: {type: 'boolean', const: true, description: 'Must be true: acknowledges that this call may be billed.'},
         timeout_ms: {type: 'integer', minimum: 1000, maximum: 60_000, default: 15_000, description: 'Timeout for the single generation.'},
-        max_output_tokens: {type: 'integer', minimum: 1, maximum: 32, default: 8, description: 'Output token cap for the generation.'}
+        max_output_tokens: {type: 'integer', minimum: 1, maximum: 512, default: 128, description: 'Output token cap for the generation. The default leaves enough room for reasoning models to emit their final reply.'}
       }, ['target', 'confirm_billable']), annotations: annotations('Verify model inference (billable)', {openWorld: true})},
     {name: 'project_init', title: 'Initialize project memory',
       description: 'Create or update shared project metadata. Does not clone or read the repository. Use one stable project_id per repository and pass it to every later tool call.',

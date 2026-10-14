@@ -11,6 +11,9 @@ import {BudgetLedger} from './budget.js';
 import {runConsensus, runSwarm} from './orchestration.js';
 import {createRoutingStats, taskTypeOf} from './routing-stats.js';
 
+const HEALTH_CHECK_MAX_OUTPUT_TOKENS = 128;
+const VERIFY_MODEL_MAX_OUTPUT_TOKENS = 128;
+
 /** Per-target maps accept caller-chosen model names, so they are bounded (oldest entry evicted). */
 const boundedSet = (map, key, value) => { if (!map.has(key) && map.size >= 512) map.delete(map.keys().next().value); map.set(key, value); };
 
@@ -212,7 +215,7 @@ export class Router {
       const base = {provider: target.name, model: target.model};
       let admission;
       try {
-        admission = await this.budget.admit({target, messages, maxOutputTokens: 8, scope: 'system'});
+        admission = await this.budget.admit({target, messages, maxOutputTokens: HEALTH_CHECK_MAX_OUTPUT_TOKENS, scope: 'system'});
       } catch (error) {
         if (!(error instanceof ToolError)) throw error;
         return {...base, ok: false, latency_ms: 0, kind: 'budget_exceeded', reason: error.details?.limit || error.code};
@@ -221,7 +224,7 @@ export class Router {
       const started = this.clock();
       const settleDetails = {target, role: 'health_check', request_id};
       try {
-        const output = await this.callTarget(target, messages, {timeoutMs: this.cfg.healthTimeoutMs, maxTokens: 8});
+        const output = await this.callTarget(target, messages, {timeoutMs: this.cfg.healthTimeoutMs, maxTokens: HEALTH_CHECK_MAX_OUTPUT_TOKENS});
         const latency = this.clock() - started;
         const usage = await this.budget.settle(admission.reservation, {...settleDetails, status: 'success', output});
         log.info('health_check_target', {...base, status: 'success', duration_ms: latency});
@@ -261,7 +264,7 @@ export class Router {
   }
 
   /** One minimal billable generation against an explicit target. Never automatic, retried or failed over. */
-  async verifyModel({target, timeout_ms = 15_000, max_output_tokens = 8, request_id} = {}) {
+  async verifyModel({target, timeout_ms = 15_000, max_output_tokens = VERIFY_MODEL_MAX_OUTPUT_TOKENS, request_id} = {}) {
     let resolved;
     try { resolved = parseTarget(String(target || ''), this.registry); } catch { throw new ToolError('target_not_allowed', 'Requested target is not a registered provider'); }
     resolved = withRotationOptIn(resolved, this.cfg);
