@@ -264,7 +264,7 @@
     },
     {
       "path": "src/core.js",
-      "sha256": "0605e437d61681928c1cce90a5476630dc2d511fba122d482750107cdc92b9ed"
+      "sha256": "8f20a40abd1a80d772e4580714fa21a343c9d45a9eda977f2813fe582b7e5192"
     },
     {
       "path": "src/dashboard.js",
@@ -408,7 +408,7 @@
     },
     {
       "path": "src/tools.js",
-      "sha256": "9d455df9cd436b2336c17b9f65e4abb06b4225528deb7c78373e540580c20926"
+      "sha256": "6a38ecc04ce6e94a06df45c3c2967015da82643b3e2082ce45e5ce28d449fad6"
     },
     {
       "path": "src/usage.js",
@@ -564,7 +564,7 @@
     },
     {
       "path": "test/verify.test.js",
-      "sha256": "38ef2f5dd8ea784dec9492ba415c9374e0cb8f1449c5c02b38e100b73b9d9610"
+      "sha256": "fe55acd7dbf8aabee7920933cb3e557cbc032826b7af6488ff1ea073658b3746"
     },
     {
       "path": "test/workspace.test.js",
