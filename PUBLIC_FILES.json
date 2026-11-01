@@ -443,6 +443,10 @@
       "sha256": "b17147dee337b8ad18b05b6c3ce1dd9aff6d36a68407b372c2d7c87f34da5f2d"
     },
     {
+      "path": "test/adversarial-boundaries.test.js",
+      "sha256": "46446a77ed39be65f556db0c024b215b6b24a299677186ec7bf2f87fa304a0bd"
+    },
+    {
       "path": "test/audit-410-missions.test.js",
       "sha256": "5a18fe98198eb1c3ace8a1eb5741fbd324ab565449e35f820b0901c9632f6ff3"
     },
