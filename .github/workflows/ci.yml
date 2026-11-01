@@ -11,7 +11,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: ['22', '24']
+        node: ['22', '24', '26']
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
@@ -68,8 +68,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - name: Line/branch/function coverage (report only)
-        run: npm run test:coverage
+      - name: Coverage gate (90% lines / 75% branches / 80% functions)
+        run: npm run test:gate
   public-files:
     name: public files audit
     runs-on: ubuntu-latest
@@ -85,3 +85,4 @@ jobs:
         run: npm run check:release
       - name: Tracked files match the audited allowlist
         run: npm run check:public
+

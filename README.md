@@ -6,7 +6,7 @@ Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
 **v4.3.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
 
-[English](README.en.md) · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
+[English](README.en.md) · **[Começar em 60 s](docs/QUICKSTART_60S.md)** · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 
 ## Para que serve
 
@@ -106,6 +106,26 @@ DZ23_ALLOW_PAID=false
 
 Para nuvem: configure a chave em privado, rode `discover_models`, confirme com
 `verify_model` (`confirm_billable: true`) e só então acrescente `provider:model` à rotação.
+
+### Qualquer API, sem editar código
+
+Provedor fora do catálogo entra pelo próprio `.env` — qualquer endpoint compatível com OpenAI
+ou Anthropic:
+
+```env
+DZ23_PROVIDERS=minhaapi
+DZ23_MINHAAPI_BASE_URL=https://api.exemplo.com/v1
+DZ23_MINHAAPI_API_KEY=sk-...
+DZ23_MINHAAPI_MODEL=modelo-padrao
+DZ23_MINHAAPI_PROTOCOL=openai     # ou anthropic
+DZ23_MINHAAPI_TIER=mixed          # paid | low-cost | mixed | free-tier | local
+DZ23_ROTATION=minhaapi:modelo-padrao
+```
+
+Dá para declarar quantos quiser (`DZ23_PROVIDERS=a,b,c`), cada um com seu protocolo, tier e modelo.
+`TIER=local` dispensa chave e aceita HTTP em loopback/rede privada. Detalhes e exemplos em
+[docs/PROVIDERS_QUALQUER_API.md](docs/PROVIDERS_QUALQUER_API.md).
+
 
 ## Custos e orçamento
 
