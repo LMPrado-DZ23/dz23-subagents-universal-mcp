@@ -1,0 +1,117 @@
+name: Release
+
+# Publica quando uma tag v* é empurrada:
+#   git tag v4.4.0 && git push origin v4.4.0
+#
+# Segredos necessários no repositório:
+#   NPM_TOKEN  — token de publicação no npm (Settings → Secrets → Actions)
+# O GITHUB_TOKEN já basta para o GHCR e para a Release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag existente para publicar (ex.: v4.4.0)'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify before publishing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Syntax and lint
+        run: npm run check
+      - name: Regression tests
+        run: npm test
+      - name: Release manifest, public allowlist and secret patterns
+        run: |
+          npm run check:release
+          npm run check:public
+      - name: Tag matches package.json version
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$version" ]; then
+            echo "Tag $tag does not match package version $version" >&2
+            exit 1
+          fi
+
+  npm:
+    name: publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish with provenance
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  ghcr:
+    name: publish container image
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          docker build -t "$image:${tag#v}" -t "$image:latest" .
+          docker push "$image:${tag#v}"
+          docker push "$image:latest"
+
+  release:
+    name: github release
+    needs: [npm, ghcr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Create release with SBOM
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; nothing to do."
+            exit 0
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file <(awk -v t="$tag" 'BEGIN{p=0} $0 ~ "^## "t" " {p=1; next} p && /^## / {exit} p' CHANGELOG.md) \
+            SBOM.spdx.json

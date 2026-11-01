@@ -1,5 +1,34 @@
 # Changelog
 
+## 4.4.0 — 2026-11-01 — qualquer API pelo `.env` e pacote instalável
+
+Versão menor: nenhuma ferramenta muda de contrato. O que entra é **distribuição** e
+**provedor genérico**.
+
+### Novo
+
+- **Provedores genéricos (`src/generic-providers.js`)**: declare `DZ23_PROVIDERS=nome1,nome2` e
+  preencha `DZ23_<NOME>_BASE_URL`, `_API_KEY` (ou `_API_KEY_FILE`), `_MODEL`, `_PROTOCOL`
+  (`openai`/`anthropic`), `_TIER` e `_LABEL`. Qualquer endpoint compatível entra sem editar código,
+  quantos o operador quiser.
+- **Falha explícita na inicialização** para nome inválido, `BASE_URL` ausente, protocolo ou tier
+  desconhecido — não existe provedor meio-configurado.
+- **`npm run test:gate`**: cobertura com limite (90% linhas, 75% branches, 80% funções); a CI passa a
+  falhar quando a cobertura cai.
+- **Pacote publicável**: `private` removido, `files`/`publishConfig` definidos — `npm i -g` e
+  `npx` passam a funcionar.
+
+### Documentação
+
+- `docs/PROVIDERS_QUALQUER_API.md` — contrato completo com exemplos (Ollama local, vLLM da equipe,
+  revenda, gateway Anthropic).
+- `.env.example` ganhou o bloco "QUALQUER API", com exemplo comentado pronto para descomentar.
+
+### Infra
+
+- Matriz de CI inclui **Node 26**.
+- Novo workflow de release: tag `v*` publica no npm, constrói a imagem no GHCR e cria a Release.
+
 ## 4.3.0 — 2026-09-17 — provedores de conta (CLIs logadas) antes das APIs por token
 
 Versão menor: as ferramentas da 4.2.0 mantêm contrato. Os provedores de conta ficam **desligados por padrão**

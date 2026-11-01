@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import {ProviderError, classifyHttpFailure, parseRetryAfter} from './provider-errors.js';
 import {isPrivateEndpoint, privateHostList} from './endpoints.js';
 import {callCli, cliRegistryEntries, listCliModels} from './cli-providers.js';
+import {genericProviderDefs} from './generic-providers.js';
 
 export {classifyHttpFailure} from './provider-errors.js';
 
@@ -96,11 +97,11 @@ function validateBaseURL(raw, name, privateHosts) {
 
 export function providerRegistry(env = process.env) {
   const privateHosts = privateHostList(env.DZ23_PRIVATE_HOSTS);
-  return {...cliRegistryEntries(env, C), ...apiRegistry(env, privateHosts)};
+  return {...cliRegistryEntries(env, C), ...apiRegistry(env, privateHosts, genericProviderDefs(env))};
 }
 
-function apiRegistry(env, privateHosts) {
-  return Object.fromEntries(Object.entries(defs).map(([name, d]) => {
+function apiRegistry(env, privateHosts, extraDefs = {}) {
+  return Object.fromEntries(Object.entries({...defs, ...extraDefs}).map(([name, d]) => {
     const specific = envAny([d.keyName, ...(d.aliases || [])], env);
     const generic = !specific.value && d.genericAliases ? envAny(d.genericAliases, env) : {value: '', source: 'none'};
     const useGeneric = Boolean(generic.value) && genericAllowed(name, env);
