@@ -8,7 +8,7 @@
     },
     {
       "path": ".env.example",
-      "sha256": "9d2373ac510a078e25dbc1b98cd57688733ae1274f39bf2ec97dab0891ba0ce5"
+      "sha256": "ef4306f2950076714f86580572a32cb95d16dd18131decf8c38fe5a575beb08e"
     },
     {
       "path": ".gitattributes",
@@ -28,11 +28,11 @@
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "25cf084994d98b6118eb9035e4e9cc0ad8fbc5c5a17f363dd1624c145aad7c24"
+      "sha256": "8d31e50ec622bb7e343c43c761d202510bcba8129455b286b9c77b6325871ec0"
     },
     {
       "path": ".github/workflows/release.yml",
-      "sha256": "7951e3425175324a89e773bfdf397e7401bed7369e501d7016043b348e5dd2a4"
+      "sha256": "ee64dc2bf3b94b00a7a4b64d947d57ffe27cdcdfbf3cd82e44f7b607dfa1cef0"
     },
     {
       "path": ".gitignore",

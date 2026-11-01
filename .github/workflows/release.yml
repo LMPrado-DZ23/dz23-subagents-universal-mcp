@@ -64,10 +64,23 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+      - name: Check npm token
+        id: token
+        run: |
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::NPM_TOKEN ausente: publicacao no npm ignorada nesta tag."
+          fi
       - name: Publish with provenance
+        if: steps.token.outputs.present == 'true'
         run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: npm not published
+        if: steps.token.outputs.present != 'true'
+        run: echo "Tag publicada sem npm. Adicione o segredo NPM_TOKEN e rode este workflow de novo para publicar o pacote."
 
   ghcr:
     name: publish container image
