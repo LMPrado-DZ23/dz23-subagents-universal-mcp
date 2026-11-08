@@ -1,5 +1,20 @@
 # Validação
 
+## v4.4.0 — spec 2026-07-28, `outputSchema` e consistência de release
+
+Data: 2026-11-08. Branch `main` a partir da tag `v4.4.0`. Mudanças desta entrega:
+
+- **Cache hints da spec 2026-07-28**: `tools/list` (30 s, `private`), `resources/list` (60 s, `private`),
+  `prompts/list` (60 s, `public`) e `resources/read` (0 ms, `private`). Revisões anteriores recebem o
+  resultado sem os campos novos.
+- **`outputSchema`** nas tools estruturadas: `list_models`, `provider_inventory`, `mission_status`,
+  `routing_explain`, `cost_estimate` e `account_status` (derivados do código que monta cada resposta).
+- **Consistência de release**: versão em README/SECURITY/VALIDATION, contagem real de tools (24) e
+  badges de CI/npm/licença/Node.
+- **OAuth**: HTTP segue token-based; OAuth 2.1/OIDC documentado como roadmap, não implementado.
+
+Evidência: `npm test` 293/293, `npm run check` 0 problemas, `npm run check:inspector` 7/7.
+
 ## v4.3.0 — provedores de conta (CLIs logadas) antes das APIs
 
 Data: 2026-09-17. Branch `feat/4.3.0` a partir da tag `v4.2.0`. As CLIs de conta desta máquina foram

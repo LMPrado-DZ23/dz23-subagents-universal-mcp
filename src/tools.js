@@ -111,6 +111,50 @@ const annotations = (title, {readOnly = false, idempotent = false, openWorld = f
   title, readOnlyHint: readOnly, destructiveHint: false, idempotentHint: idempotent, openWorldHint: openWorld
 });
 
+// JSON Schema for structuredContent. Derived from the code that builds each result; extra fields are allowed.
+const outObject = (properties, required) => ({type: 'object', properties, additionalProperties: true, ...(required?.length ? {required} : {})});
+const outArrayOf = items => ({type: 'array', items});
+const OUTPUT_SCHEMAS = {
+  listModels: outObject({items: outArrayOf(outObject({
+    provider: {type: 'string'}, model: {type: 'string'}, tier: {type: 'string'}, enabled: {type: 'boolean'},
+    base_url: {type: 'string'}, location: {type: 'string'}, capabilities: {type: 'object'}, model_capabilities: {type: 'object'},
+    inference_verified: {type: 'boolean'}, credential_source: {type: 'string'}
+  }))}, ['items']),
+  providerInventory: outObject({items: outArrayOf(outObject({
+    provider: {type: 'string'}, adapter: {type: 'string'}, base_url: {type: 'string'},
+    credential_configured: {type: 'boolean'}, credential_source: {type: 'string'}, default_model: {type: 'string'},
+    tier: {type: 'string'}, local_or_cloud: {type: 'string'}, enabled: {type: 'boolean'}, capabilities: {type: 'object'},
+    status: {type: 'string'},
+    status_flags: outObject({configured: {type: 'boolean'}, credential_present: {type: 'boolean'}, credential_required: {type: 'boolean'},
+      catalog_discovered: {type: 'boolean'}, inference_verified: {type: 'boolean'}})
+  }))}, ['items']),
+  missionStatus: outObject({
+    state: {type: 'object'},
+    recent_events: outArrayOf({type: 'object'}),
+    journal_integrity: outObject({invalid_lines: {type: 'integer'}, last_seq: {type: 'integer'}})
+  }, ['state', 'recent_events', 'journal_integrity']),
+  routingExplain: outObject({
+    task_type: {type: 'string'}, policy: {type: 'string'}, adaptive: {type: 'boolean'},
+    order: outArrayOf({type: 'string'}), targets: outArrayOf({type: 'object'}),
+    requested: {type: 'object'}, note: {type: 'string'}
+  }, ['task_type', 'policy', 'adaptive', 'order', 'targets', 'note']),
+  costEstimate: outObject({
+    tool: {type: 'string'}, calls: {type: 'integer'},
+    input_tokens_per_call: {type: 'integer'}, max_output_tokens_per_call: {type: 'integer'}, max_total_tokens: {type: 'integer'},
+    targets: outArrayOf({type: 'object'}), max_total_cost_usd: {type: ['number', 'null']}, note: {type: 'string'}
+  }, ['tool', 'calls', 'input_tokens_per_call', 'max_output_tokens_per_call', 'max_total_tokens', 'targets', 'note']),
+  accountStatus: outObject({
+    accounts: outArrayOf(outObject({
+      provider: {type: 'string'}, label: {type: 'string'}, installed: {type: 'boolean'}, logged_in: {type: 'boolean'},
+      method: {type: 'string'}, login: {type: 'string'}, verified_adapter: {type: 'boolean'}, tier: {type: 'string'},
+      selected: {type: 'boolean'}
+    })),
+    selection: {type: 'string'},
+    gateways: outArrayOf(outObject({provider: {type: 'string'}, configured: {type: 'boolean'}, base_url: {type: 'string'}, tier: {type: 'string'}})),
+    order: {type: 'string'}, note: {type: 'string'}
+  }, ['accounts', 'selection', 'gateways', 'order', 'note'])
+};
+
 export function buildTools(limits = toolLimits()) {
   const projectId = idField('Project memory identifier. Not an authorization boundary.');
   const missionId = idField('Mission identifier inside the project.');
@@ -120,10 +164,10 @@ export function buildTools(limits = toolLimits()) {
   const tools = [
     {name: 'list_models', title: 'List routing targets',
       description: 'List configured, policy-eligible routing targets with tier and adapter capabilities. No network calls.',
-      inputSchema: object({}), annotations: annotations('List routing targets', {readOnly: true, idempotent: true})},
+      inputSchema: object({}), outputSchema: OUTPUT_SCHEMAS.listModels, annotations: annotations('List routing targets', {readOnly: true, idempotent: true})},
     {name: 'provider_inventory', title: 'Provider inventory',
       description: 'Inventory every registered provider with configuration status and credential source, never credential values. No network calls.',
-      inputSchema: object({}), annotations: annotations('Provider inventory', {readOnly: true, idempotent: true})},
+      inputSchema: object({}), outputSchema: OUTPUT_SCHEMAS.providerInventory, annotations: annotations('Provider inventory', {readOnly: true, idempotent: true})},
     {name: 'discover_models', title: 'Discover models',
       description: 'Query provider /models catalogs (cached five minutes). A catalog entry does not prove inference access.',
       inputSchema: object({
@@ -158,7 +202,7 @@ export function buildTools(limits = toolLimits()) {
         project_id: projectId, mission_id: missionId,
         events_limit: {type: 'integer', minimum: 1, maximum: 200, default: 40, description: 'Recent journal events to return.'},
         include_outputs: {type: 'boolean', default: false, description: 'Return full stored agent outputs instead of previews (can be very large).'}
-      }, ['project_id', 'mission_id']), annotations: annotations('Mission status', {readOnly: true, idempotent: true})},
+      }, ['project_id', 'mission_id']), outputSchema: OUTPUT_SCHEMAS.missionStatus, annotations: annotations('Mission status', {readOnly: true, idempotent: true})},
     {name: 'memory_checkpoint', title: 'Memory checkpoint',
       description: 'Persist a structured handoff checkpoint for another harness or agent. Creates the mission when absent. Use the same project_id and mission_id the task used for delegate, consensus and swarm_run.',
       inputSchema: object({
@@ -270,15 +314,18 @@ export function buildTools(limits = toolLimits()) {
       annotations: annotations('Get playbook', {readOnly: true, idempotent: true})},
     {name: 'routing_explain', title: 'Explain model routing', description: 'Which models the server would use for a task type right now, in order, and why others are skipped: cost tier, eligibility, cooldowns, observed success and latency, quota from provider headers. No provider calls.',
       inputSchema: object({task_type: {type: 'string', enum: TASK_TYPES}, role: {type: 'string', enum: ROLES, default: 'worker'}, target: {type: 'string', pattern: TARGET_PATTERN, default: 'auto'}}),
+      outputSchema: OUTPUT_SCHEMAS.routingExplain,
       annotations: annotations('Explain model routing', {readOnly: true, idempotent: true})},
     {name: 'cost_estimate', title: 'Estimate call cost', description: 'Upper bound of calls, tokens and cost (when DZ23_PRICES_FILE has prices) for delegate, consensus or swarm_run before running it. No provider calls.',
       inputSchema: object({tool: {type: 'string', enum: ['delegate', 'consensus', 'swarm_run'], default: 'delegate'}, prompt: plain(limits.maxPromptChars, 'Prompt or goal to size.'),
         prompt_chars: {type: 'integer', minimum: 0, maximum: 1000000}, models: {type: 'integer', minimum: 2, maximum: 5, default: 3}, roles: {type: 'array', maxItems: 7, items: {type: 'string', enum: SWARM_ROLES}},
         max_agents: {type: 'integer', minimum: 1, maximum: 7}, synthesis: {type: 'string', enum: SYNTHESIS_MODES, default: 'heuristic'}, task_type: {type: 'string', enum: TASK_TYPES}}),
+      outputSchema: OUTPUT_SCHEMAS.costEstimate,
       annotations: annotations('Estimate call cost', {readOnly: true, idempotent: true})},
     {name: 'account_status', title: 'Account providers status',
       description: 'Which AI CLIs (Claude Code, Codex, Gemini CLI, Qwen Code, Copilot CLI, OpenCode, Cursor Agent) are installed and logged in with an account or subscription, and the login command for each. Account providers are used before per-token APIs. No model calls.',
       inputSchema: object({refresh: {type: 'boolean', default: false, description: 'Re-check now instead of using the 5-minute cache.'}}),
+      outputSchema: OUTPUT_SCHEMAS.accountStatus,
       annotations: annotations('Account providers status', {readOnly: true, idempotent: true})},
     {name: 'patch_validate', title: 'Validate patch in sandbox',
       description: 'Apply a unified diff to a throwaway copy of the repository at HEAD and run one allowlisted test command there (DZ23_SANDBOX_COMMANDS, exact match). The original working tree is never modified; nothing is committed or pushed. Process mode does not isolate the network; docker mode runs with --network none. Returns exit code, timeout flag and masked output tails.',

@@ -70,11 +70,11 @@ test('initialize negotiates supported revisions and rejects malformed versions',
   assert.equal(latest.result.protocolVersion, '2025-11-25');
   assert.equal(latest.result.serverInfo.version, JSON.parse(fs.readFileSync(path.join(source, 'package.json'), 'utf8')).version);
   assert.deepEqual(latest.result.capabilities, {tools: {listChanged: false}, resources: {subscribe: false, listChanged: false}, prompts: {listChanged: false}});
-  assert.equal((await init('2024-11-05')).result.protocolVersion, '2025-11-25');
+  assert.equal((await init('2024-11-05')).result.protocolVersion, '2026-07-28');
   const bad = await init('future-unsupported');
   assert.equal(bad.error.code, -32602);
   assert.equal(bad.error.message, 'Unsupported protocol version');
-  assert.deepEqual(bad.error.data.supported, ['2025-11-25', '2025-06-18']);
+  assert.deepEqual(bad.error.data.supported, ['2026-07-28', '2025-11-25', '2025-06-18']);
   assert.equal((await init(undefined)).error.code, -32602);
 });
 

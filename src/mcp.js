@@ -1,6 +1,6 @@
 import {
   SERVER_NAME, SERVER_VERSION, SERVER_DESCRIPTION, SUPPORTED_PROTOCOL_VERSIONS, LATEST_PROTOCOL_VERSION,
-  VALIDATION_AS_TOOL_ERROR_VERSIONS, RPC_ERRORS
+  VALIDATION_AS_TOOL_ERROR_VERSIONS, CACHE_HINT_VERSIONS, RPC_ERRORS
 } from './constants.js';
 import {validate, ValidationError, isPlainObject} from './schema.js';
 import {buildTools, toolLimits, toolEnabled, TOOL_POLICIES} from './tools.js';
@@ -32,6 +32,21 @@ export function negotiateProtocolVersion(requested) {
 
 export function toolDefinitions(cfg = {}) {
   return buildTools(toolLimits(cfg));
+}
+
+// Cache hints (spec 2026-07-28). ttlMs=0 means "do not reuse"; prompts are static, so they may be cached publicly.
+const CACHE_HINTS = Object.freeze({
+  'tools/list': {ttlMs: 30_000, cacheScope: 'private'},
+  'resources/list': {ttlMs: 60_000, cacheScope: 'private'},
+  'prompts/list': {ttlMs: 60_000, cacheScope: 'public'},
+  'resources/read': {ttlMs: 0, cacheScope: 'private'}
+});
+
+/** Attach ttlMs/cacheScope only for revisions that define them; older clients keep the plain result. */
+function withCacheHints(method, result, ctx) {
+  const version = ctx?.session?.protocolVersion;
+  if (!version || !CACHE_HINT_VERSIONS.has(version)) return result;
+  return result && typeof result === 'object' ? {...result, ...CACHE_HINTS[method]} : result;
 }
 
 // Compact JSON: indentation roughly doubled every result that callers pay to read.
@@ -298,11 +313,11 @@ export function createMcpHandler(router, memory, options = {}) {
     }
     if (typeof method === 'string' && method.startsWith('notifications/')) return null;
     if (method === 'ping') return {};
-    if (method === 'tools/list') return {tools};
-    if (method === 'resources/list') return listResources(memory, msg.params, ctx);
+    if (method === 'tools/list') return withCacheHints('tools/list', {tools}, ctx);
+    if (method === 'resources/list') return withCacheHints('resources/list', await listResources(memory, msg.params, ctx), ctx);
     if (method === 'resources/templates/list') return listResourceTemplates(ctx);
-    if (method === 'resources/read') return readResource(memory, msg.params, ctx, compactMission);
-    if (method === 'prompts/list') return listPrompts();
+    if (method === 'resources/read') return withCacheHints('resources/read', await readResource(memory, msg.params, ctx, compactMission), ctx);
+    if (method === 'prompts/list') return withCacheHints('prompts/list', listPrompts(), ctx);
     if (method === 'prompts/get') return getPrompt(msg.params);
     if (method === 'tools/call') return callTool(msg.params, ctx);
     throw new RpcError(RPC_ERRORS.METHOD_NOT_FOUND, 'Method not found', {method: safeText(method, 64)});

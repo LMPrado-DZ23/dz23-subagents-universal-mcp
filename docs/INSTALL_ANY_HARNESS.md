@@ -74,8 +74,9 @@ um cliente na documentação não comprova teste naquela aplicação.
 
 ## Protocolo
 
-O servidor implementa ferramentas (tools) nas revisões MCP **2025-11-25** e **2025-06-18**.
-Clientes que pedem outra revisão datada recebem 2025-11-25 como contraproposta e decidem se
+O servidor implementa ferramentas (tools) nas revisões MCP **2026-07-28** (com cache hints),
+**2025-11-25** e **2025-06-18**. Clientes que pedem outra revisão datada recebem 2026-07-28 como
+contraproposta e decidem se
 continuam. Em stdio até `DZ23_STDIO_MAX_INFLIGHT` (8) requisições rodam em paralelo, e
 `notifications/cancelled` com `params.requestId` interrompe a chamada correspondente (nenhuma
 resposta é enviada para ela). Não há resources, prompts, sampling, elicitation, tasks, batching ou

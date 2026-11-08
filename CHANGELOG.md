@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.4.1] — 2026-11-08
+
+- Spec 2026-07-28: cache hints (`ttlMs`/`cacheScope`) em list/read
+- `outputSchema` nas tools estruturadas
+- Consistência de versão em README/SECURITY/VALIDATION
+- Contagem de tools corrigida
+
 ## 4.4.0 — 2026-11-01 — qualquer API pelo `.env` e pacote instalável
 
 Versão menor: nenhuma ferramenta muda de contrato. O que entra é **distribuição** e

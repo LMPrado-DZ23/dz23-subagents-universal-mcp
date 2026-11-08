@@ -5,19 +5,19 @@ servidor aplica esse mesmo schema antes de executar qualquer coisa, em stdio, HT
 e REST `/api/*`. Limites de texto são configuráveis e nunca ilimitados
 (`DZ23_MAX_PROMPT_CHARS`, padrão 32 000; `DZ23_MAX_GOAL_CHARS`, padrão 8 000).
 
-| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
-| --- | --- | --- | --- | --- |
-| `list_models` | `{}` | Alvos elegíveis, capabilities do adapter e do catálogo, verificação | `provider:discover` | sem rede |
-| `provider_inventory` | `{}` | Registro, origem da credencial e flags de estado; nunca valores | `admin:inventory` | sem rede |
-| `discover_models` | `provider`, `refresh` | Consulta `/models` só de providers habilitados (cache de 5 min) e persiste o resultado; provider desabilitado devolve lista vazia | `provider:discover` | rede, sem inferência |
-| `health_check` | `confirm_billable: true` | Uma geração mínima por alvo elegível | `health:execute` | **pode cobrar** |
-| `verify_model` | `target`, `confirm_billable: true` | Uma geração mínima em `provider:model` | `health:execute` | **pode cobrar** |
-| `project_init` | `project_id`, `workspace`, `repository`, `branch` | Cria/atualiza metadados | `memory:write` | local |
-| `mission_status` | `project_id`, `mission_id`, `events_limit`, `include_outputs` | Estado, eventos recentes e integridade do journal | `memory:read` | local |
-| `memory_checkpoint` | IDs e campos estruturados | Checkpoint de handoff; cria a missão se ausente | `memory:write` | local |
-| `delegate` | `prompt`, IDs, `role`, `target` | Uma resposta textual com retry/failover | `delegate:execute` + `memory:write` | **pode cobrar** |
-| `consensus` | `prompt`, `models` (2–5), roteamento, `synthesis` | Revisores em alvos distintos e síntese | `delegate:execute` + `memory:write` | **pode cobrar** |
-| `swarm_run` | `goal`, `roles`, `max_agents`, roteamento, `response_mode` | Especialistas em paralelo e um revisor integrador | `delegate:execute` + `memory:write` | **pode cobrar** |
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo | Output schema |
+| --- | --- | --- | --- | --- | --- |
+| `list_models` | `{}` | Alvos elegíveis, capabilities do adapter e do catálogo, verificação | `provider:discover` | sem rede | sim |
+| `provider_inventory` | `{}` | Registro, origem da credencial e flags de estado; nunca valores | `admin:inventory` | sem rede | sim |
+| `discover_models` | `provider`, `refresh` | Consulta `/models` só de providers habilitados (cache de 5 min) e persiste o resultado; provider desabilitado devolve lista vazia | `provider:discover` | rede, sem inferência | — |
+| `health_check` | `confirm_billable: true` | Uma geração mínima por alvo elegível | `health:execute` | **pode cobrar** | — |
+| `verify_model` | `target`, `confirm_billable: true` | Uma geração mínima em `provider:model` | `health:execute` | **pode cobrar** | — |
+| `project_init` | `project_id`, `workspace`, `repository`, `branch` | Cria/atualiza metadados | `memory:write` | local | — |
+| `mission_status` | `project_id`, `mission_id`, `events_limit`, `include_outputs` | Estado, eventos recentes e integridade do journal | `memory:read` | local | sim |
+| `memory_checkpoint` | IDs e campos estruturados | Checkpoint de handoff; cria a missão se ausente | `memory:write` | local | — |
+| `delegate` | `prompt`, IDs, `role`, `target` | Uma resposta textual com retry/failover | `delegate:execute` + `memory:write` | **pode cobrar** | — |
+| `consensus` | `prompt`, `models` (2–5), roteamento, `synthesis` | Revisores em alvos distintos e síntese | `delegate:execute` + `memory:write` | **pode cobrar** | — |
+| `swarm_run` | `goal`, `roles`, `max_agents`, roteamento, `response_mode` | Especialistas em paralelo e um revisor integrador | `delegate:execute` + `memory:write` | **pode cobrar** | — |
 
 Em stdio não há escopos: a instância é um único domínio de confiança. `project_id`
 organiza memória e nunca autentica ou autoriza.
@@ -205,19 +205,19 @@ reproduzem o que o catálogo do provider declara e ficam `unknown` quando não h
 A 4.1.0 mantém as onze ferramentas e o contrato da 4.0.0 e acrescenta onze. As de workspace só
 aparecem em `tools/list` (e só podem ser chamadas) quando `DZ23_WORKSPACE_ROOTS` está configurada.
 
-| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
-| --- | --- | --- | --- | --- |
-| `workspace_read` | `workspace`, `path` | Lista uma pasta ou lê um arquivo UTF-8 limitado dentro das raízes permitidas | `workspace:read` | local |
-| `workspace_search` | `workspace`, `query`, `regex`, `max_results` | Busca texto ou regex em todos os arquivos permitidos (até `DZ23_WORKSPACE_MAX_FILES`) | `workspace:read` | local |
-| `git_readonly` | `workspace`, `operation` (`status`, `diff`, `log`, `show`) | Git somente leitura, blindado contra configuração do repositório | `git:read` | local |
-| `mission_start` | `goal`, IDs, `roles`, `acceptance_criteria`, `routing_strategy`, `max_iterations`, `lease_token` | Inicia um loop de missão em segundo plano e devolve `job_id` | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** |
-| `mission_status_job` | `job_id` (+ `project_id`, `mission_id` após reinício) | Estado do job; `orphaned` quando o processo que o executava parou | `mission:control` + `memory:read` | local |
-| `mission_pause` | `job_id` | Pausa ao fim da iteração atual | `mission:control` + `memory:write` | local |
-| `mission_resume` | `job_id` | Novo `job_id` com o mesmo objetivo, papéis, critérios e iterações restantes | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** |
-| `mission_cancel` | `job_id` | Cancela job em execução ou pausado; job terminado mantém o status final | `mission:control` + `memory:write` | local |
-| `mission_claim` | IDs, `identity`, `lease_ms`, `lease_token` | Trava a missão para um harness, com expiração; renovação exige o token | `mission:lease` + `memory:write` | local |
-| `mission_release` | IDs, `token` | Libera a trava | `mission:lease` + `memory:write` | local |
-| `handoff_export` | IDs | `{markdown}` com objetivo, estado, critérios, decisões, testes e próximos passos | `memory:read` | local |
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo | Output schema |
+| --- | --- | --- | --- | --- | --- |
+| `workspace_read` | `workspace`, `path` | Lista uma pasta ou lê um arquivo UTF-8 limitado dentro das raízes permitidas | `workspace:read` | local | — |
+| `workspace_search` | `workspace`, `query`, `regex`, `max_results` | Busca texto ou regex em todos os arquivos permitidos (até `DZ23_WORKSPACE_MAX_FILES`) | `workspace:read` | local | — |
+| `git_readonly` | `workspace`, `operation` (`status`, `diff`, `log`, `show`) | Git somente leitura, blindado contra configuração do repositório | `git:read` | local | — |
+| `mission_start` | `goal`, IDs, `roles`, `acceptance_criteria`, `routing_strategy`, `max_iterations`, `lease_token` | Inicia um loop de missão em segundo plano e devolve `job_id` | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** | — |
+| `mission_status_job` | `job_id` (+ `project_id`, `mission_id` após reinício) | Estado do job; `orphaned` quando o processo que o executava parou | `mission:control` + `memory:read` | local | — |
+| `mission_pause` | `job_id` | Pausa ao fim da iteração atual | `mission:control` + `memory:write` | local | — |
+| `mission_resume` | `job_id` | Novo `job_id` com o mesmo objetivo, papéis, critérios e iterações restantes | `mission:control` + `memory:write` + `delegate:execute` | **pode cobrar** | — |
+| `mission_cancel` | `job_id` | Cancela job em execução ou pausado; job terminado mantém o status final | `mission:control` + `memory:write` | local | — |
+| `mission_claim` | IDs, `identity`, `lease_ms`, `lease_token` | Trava a missão para um harness, com expiração; renovação exige o token | `mission:lease` + `memory:write` | local | — |
+| `mission_release` | IDs, `token` | Libera a trava | `mission:lease` + `memory:write` | local | — |
+| `handoff_export` | IDs | `{markdown}` com objetivo, estado, critérios, decisões, testes e próximos passos | `memory:read` | local | — |
 
 ### Workspace e Git
 
@@ -332,9 +332,9 @@ As ferramentas novas existem só em MCP (stdio e `/mcp`); a API REST continua co
 
 ## Ferramentas adicionadas na 4.3.0
 
-| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
-| --- | --- | --- | --- | --- |
-| `account_status` | `refresh` | CLIs de IA instaladas, quais estão logadas com conta, o comando de login que falta e os gateways de conta configurados | `provider:discover` | sem rede |
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo | Output schema |
+| --- | --- | --- | --- | --- | --- |
+| `account_status` | `refresh` | CLIs de IA instaladas, quais estão logadas com conta, o comando de login que falta e os gateways de conta configurados | `provider:discover` | sem rede | sim |
 
 `account_status` não lê nem mostra credenciais: para cada CLI ele chama o próprio comando de status dela (ou
 confere a existência do arquivo de login) e devolve só instalado/logado, o método (`claude.ai max`, `chatgpt`,
@@ -356,13 +356,13 @@ qualquer execução.
 
 ## Ferramentas adicionadas na 4.2.0
 
-| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo |
-| --- | --- | --- | --- | --- |
-| `mission_list` | `project_id`, `limit`, `cursor` | Missões com status, objetivo, próximo passo, progresso de loop/grafo e URI do resource | `memory:read` | local |
-| `playbook_get` | `name`, `arguments` | Sem `name`: lista os playbooks. Com `name`: instruções prontas (os mesmos prompts MCP) | `memory:read` | local |
-| `routing_explain` | `task_type`, `role`, `target` | Ordem de modelos que o servidor usaria agora e o motivo de cada exclusão | `provider:discover` | sem rede |
-| `cost_estimate` | `tool`, `prompt`/`prompt_chars`, `models`, `roles`, `max_agents`, `synthesis` | Limite superior de chamadas, tokens e custo antes de rodar | `provider:discover` | sem rede |
-| `patch_validate` | `workspace`, `patch`, `command`, `timeout_ms` | Aplica um diff numa cópia e roda um comando de teste permitido (desligado por padrão) | `sandbox:execute` | local |
+| Ferramenta | Entrada principal | Efeito | Escopo HTTP | Custo | Output schema |
+| --- | --- | --- | --- | --- | --- |
+| `mission_list` | `project_id`, `limit`, `cursor` | Missões com status, objetivo, próximo passo, progresso de loop/grafo e URI do resource | `memory:read` | local | — |
+| `playbook_get` | `name`, `arguments` | Sem `name`: lista os playbooks. Com `name`: instruções prontas (os mesmos prompts MCP) | `memory:read` | local | — |
+| `routing_explain` | `task_type`, `role`, `target` | Ordem de modelos que o servidor usaria agora e o motivo de cada exclusão | `provider:discover` | sem rede | sim |
+| `cost_estimate` | `tool`, `prompt`/`prompt_chars`, `models`, `roles`, `max_agents`, `synthesis` | Limite superior de chamadas, tokens e custo antes de rodar | `provider:discover` | sem rede | sim |
+| `patch_validate` | `workspace`, `patch`, `command`, `timeout_ms` | Aplica um diff numa cópia e roda um comando de teste permitido (desligado por padrão) | `sandbox:execute` | local | — |
 
 `mission_list` e `playbook_get` existem porque nem todo harness expõe resources e prompts MCP ao modelo: o
 Codex CLI 0.154 respondeu `RESOURCE_TOOLS_UNAVAILABLE` num teste real. Com eles, qualquer cliente que chama

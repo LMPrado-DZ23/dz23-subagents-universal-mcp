@@ -7,10 +7,12 @@ export const SERVER_VERSION = pkg.version;
 export const SERVER_DESCRIPTION = 'Self-hosted MCP text delegation router with shared mission memory';
 
 // Newest first. Only revisions whose tools-only server requirements are implemented.
-export const SUPPORTED_PROTOCOL_VERSIONS = Object.freeze(['2025-11-25', '2025-06-18']);
+export const SUPPORTED_PROTOCOL_VERSIONS = Object.freeze(['2026-07-28', '2025-11-25', '2025-06-18']);
 export const LATEST_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0];
+// SEP (2026-07-28): list/read results may carry cache hints (ttlMs, cacheScope).
+export const CACHE_HINT_VERSIONS = new Set(['2026-07-28']);
 // SEP-1303 (2025-11-25): input validation errors are tool execution errors.
-export const VALIDATION_AS_TOOL_ERROR_VERSIONS = new Set(['2025-11-25']);
+export const VALIDATION_AS_TOOL_ERROR_VERSIONS = new Set(['2026-07-28', '2025-11-25']);
 export const TOOL_ARGUMENT_ERROR_MODES = Object.freeze(['auto', 'jsonrpc', 'tool_result']);
 
 export const ROLES = Object.freeze(['worker', 'architect', 'backend', 'frontend', 'security', 'qa', 'devops', 'reviewer']);

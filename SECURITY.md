@@ -2,7 +2,7 @@
 
 Esta é uma prévia de engenharia para uso por um operador ou equipe confiável.
 Não há certificação de segurança, pentest independente ou isolamento multitenant.
-A versão preparada nesta entrega é 3.0.0; versões anteriores não recebem promessa
+A versão preparada nesta entrega é 4.4.0; versões anteriores não recebem promessa
 automática de backport ou SLA.
 
 ## Relatar um problema
@@ -25,6 +25,8 @@ Teste exclusivamente cópias locais/ambientes autorizados com dados sintéticos.
 - Entrada/saída de modelo é não confiável. Revise propostas antes de aplicá-las.
 - `free-first` não garante gratuidade. Configure orçamento e limites de gasto no fornecedor.
 - Não use chaves de produção em testes, issues, CI ou exemplos públicos.
+- HTTP é token-based; OAuth 2.1/OIDC (spec 2026-07-28) não está implementado.
+  Para enterprise, use um gateway autenticado na frente do servidor.
 
 ## Controles desta versão
 

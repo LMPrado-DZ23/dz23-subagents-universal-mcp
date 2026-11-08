@@ -113,7 +113,7 @@ test('HTTP auth, origin, host, notifications, malformed JSON and methods',async 
   assert.equal(response.status,202);assert.equal(await response.text(),'');
   // v2.3.0: dated but unsupported revisions receive the latest supported version as counter-offer.
   const init=await fetch(`${base}/mcp`,{method:'POST',headers,body:JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2099-01-01'}})});
-  assert.equal((await init.json()).result.protocolVersion,'2025-11-25');
+  assert.equal((await init.json()).result.protocolVersion,'2026-07-28');
 });
 test('raw provider error bodies are not returned or persisted as messages',async()=>{
   const original=globalThis.fetch;const echo='sensitive-placeholder-for-test';
