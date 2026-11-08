@@ -2,7 +2,7 @@
 
 Esta é uma prévia de engenharia para uso por um operador ou equipe confiável.
 Não há certificação de segurança, pentest independente ou isolamento multitenant.
-A versão preparada nesta entrega é 4.4.0; versões anteriores não recebem promessa
+A versão preparada nesta entrega é 4.4.1; versões anteriores não recebem promessa
 automática de backport ou SLA.
 
 ## Relatar um problema

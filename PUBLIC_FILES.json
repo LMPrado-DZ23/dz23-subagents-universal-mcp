@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "version": "4.4.0",
+  "version": "4.4.1",
   "files": [
     {
       "path": ".dockerignore",
@@ -84,7 +84,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "e3b5e959f5f9e5105f35b4fb7eb8d56232156b878b67c2e5cb3a39debd69a73c"
+      "sha256": "425c88362a605e85e97091db96d9214fe4e42736ed75a7e0110a40c399263722"
     },
     {
       "path": "SBOM.spdx.json",
@@ -92,7 +92,7 @@
     },
     {
       "path": "SECURITY.md",
-      "sha256": "8d8bd9c8cda6d74614c10de1b444efb67f5cc74a97fdc37e120c955660baf00c"
+      "sha256": "7d7b9b788a7b828305bc8cce4e0aebd6cdd8203a866193dd2d69394d38b8c107"
     },
     {
       "path": "SUPPORT.md",
@@ -180,11 +180,11 @@
     },
     {
       "path": "docs/VALIDATION.md",
-      "sha256": "aa1f5910f2cd4e76c56462852411af5430432aa0a89f099189027c63f76dfe3b"
+      "sha256": "0409c463a4ac7c2de646053df79f6fdb2aa09bd3b6a1756f153e26ae3e5bb366"
     },
     {
       "path": "package.json",
-      "sha256": "b05849688da67945d3539efbfe6db8513dd69c244dc9c833d68adec165fe9a7a"
+      "sha256": "c8bb8cfb770e1c8b5222096c03c542ceba22a9c21eb9be2fa98a61758ff6ed88"
     },
     {
       "path": "scripts/audit-public-files.mjs",

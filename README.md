@@ -9,7 +9,7 @@
 
 Roteador MCP self-hosted para delegar tarefas de texto/código a modelos de IA,
 coordenar especialistas em paralelo e guardar o estado explícito de cada missão.
-**v4.4.0 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
+**v4.4.1 · MIT · prévia de engenharia · Node.js 22+ · sem dependências npm de runtime.**
 
 [English](README.en.md) · **[Começar em 60 s](docs/QUICKSTART_60S.md)** · [Instalação](docs/INSTALL_ANY_HARNESS.md) · [Ferramentas](docs/TOOLS.md) · [Operação](docs/OPERATIONS.md) · [Arquitetura](docs/ARCHITECTURE.md) · [Provedores](docs/PROVIDER_ARCHITECTURE.md) · [Segurança](SECURITY.md) · [Validação](docs/VALIDATION.md)
 

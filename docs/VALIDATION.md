@@ -1,6 +1,6 @@
 # Validação
 
-## v4.4.0 — spec 2026-07-28, `outputSchema` e consistência de release
+## v4.4.1 — spec 2026-07-28, `outputSchema` e consistência de release
 
 Data: 2026-11-08. Branch `main` a partir da tag `v4.4.0`. Mudanças desta entrega:
 
