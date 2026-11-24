@@ -40,7 +40,7 @@
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "fc830635ac1656ea959e6c9c9da4e778742e8dd82ebb310d7d98977d5c711794"
+      "sha256": "c2bf7376e8dee44714d06e9212ae3d11c81bf38bb73910327aef32571029312c"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -167,6 +167,10 @@
       "sha256": "4203e86bdd08e413093520bbc3cfd1f0a26e8ee935c517441e845fc3a74e2d2f"
     },
     {
+      "path": "docs/QWEN_REVIEW.md",
+      "sha256": "7b58298060289036009a71e36cff72b1bdcae522db9a495b712acd2d350db51d"
+    },
+    {
       "path": "docs/ROADMAP.md",
       "sha256": "b7dce6785ad75670ec1f5aac2221a87a0a23f3ba68940cf7e01c46a6f8abe976"
     },
@@ -217,6 +221,10 @@
     {
       "path": "scripts/publish-github.mjs",
       "sha256": "03d5d0cf3a357ad8e197fc41e022ff7aea7bdd34b5a178f75953c9846414b975"
+    },
+    {
+      "path": "scripts/qwen-review.mjs",
+      "sha256": "812a4ded3ea7f30c6ffe9136856526dcd25ae88c7161c9c8eae9bc303a4f5b99"
     },
     {
       "path": "scripts/release-check.mjs",
@@ -561,6 +569,10 @@
     {
       "path": "test/publication.test.js",
       "sha256": "623189324efc7043c59d98f95c6236ca269e1c70a371d917dac43300c4cfd0d5"
+    },
+    {
+      "path": "test/qwen-review.test.js",
+      "sha256": "9a8984bc6db4c61d67d127062f219bdd224d2f4e9af642d64453603e6df88005"
     },
     {
       "path": "test/release.test.js",

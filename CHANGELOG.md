@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+- Novo `scripts/qwen-review.mjs`: revisor independente pelo Qwen (API OpenAI-compatible), usando a mesma
+  configuração do provider `alibaba`. Fail-closed (achado crítico/alto, parecer malformado, conteúdo não
+  revisado, indício de prompt injection ou segredo residual bloqueiam), git endurecido contra execução de
+  comandos do repositório e parecer opcional em `$DZ23_VAULT/60-auditorias`. Ver `docs/QWEN_REVIEW.md`.
+
 ## [4.4.1] — 2026-11-08
 
 - Spec 2026-07-28: cache hints (`ttlMs`/`cacheScope`) em list/read
